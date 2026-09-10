@@ -14,6 +14,7 @@ Two corrections stand as hard rules now, after being learned the hard way:
 
 1. **Never use a browser-extension match score (e.g. a "Jobright"-style fit score) as the basis for a skip/apply decision.** The score is noise, not signal — every decision must be grounded in the actual job description text, read directly. If a listing's JD won't render (a known intermittent bug — see below), that's a reason to flag it as blocked, not a reason to fall back on the score.
 2. **For any role with an explicit years-of-experience requirement under 5 years, or no YOE stated at all, default to APPLYING** rather than skipping on a softer "this domain feels unfamiliar" judgment call.
+3. **When the JD's stated YOE requirement is under 5 years, disregard industry/domain-specific experience requirements too** — don't skip over a named industry (fintech, payments, ads, etc.) the same way you wouldn't skip over overall YOE. A candidate's adjacent industry background (e.g. a trading firm counting as financial-services/fintech-adjacent experience) should not be treated as disqualifying just because it isn't a literal industry match. This does not relax the separate "genuinely unfakeable capability requirements" skip category below — those are about capability, not industry background, and still apply regardless of stated YOE.
 
 Skips are reserved for:
 - Explicit 7+ years YOE stated in the JD
@@ -21,7 +22,8 @@ Skips are reserved for:
 - Out-of-scope functions: Technical Program Manager, Product Marketing Manager, Growth/Marketing leadership titles ("Head of Growth"), Strategy & Ops "Associate" titles that aren't product management at all
 - Staffing-agency/undisclosed-employer postings (log these, don't apply)
 - New-grad/future-start programs (not a current hire)
-- Genuinely unfakeable requirements stated explicitly in the JD itself — a required language the candidate doesn't speak, required hands-on custom software/engineering development (e.g. a "Forward Deployed" role requiring the candidate to personally configure/build integrations), or a named specialized domain vertical (content moderation/trust & safety, KYC/compliance, etc.)
+- Genuinely unfakeable capability requirements stated explicitly in the JD itself — a required language the candidate doesn't speak, required hands-on custom software/engineering development (e.g. a "Forward Deployed" role requiring the candidate to personally configure/build integrations), or a required specific-firm consulting pedigree (e.g. McKinsey/BCG/Bain)
+- A named specialized industry/domain vertical (fintech, payments, ads, content moderation/trust & safety, KYC/compliance, etc.) stated as a minimum qualification — but only when the JD's stated YOE requirement is 5+ years; under a 5-year requirement, or no YOE stated, apply anyway per point 3 above
 
 **Known technical wrinkle:** listings tagged as having off-platform response handling have intermittently failed to render their job description body on LinkedIn (confirmed via DOM inspection, sometimes persisting even after a full page reload), while native-Apply listings promoted directly by the hirer have rendered reliably. When a JD won't render even after a retry/reload, flag the listing as **blocked** — don't skip it (no real basis to) and don't apply blind (can't tailor honestly against unread content).
 

@@ -8,22 +8,17 @@ A new session with no prior context should read this file (and the linked files)
 
 **Discovered: a third-party "Apply with Autofill" browser-extension button, clicked directly from the LinkedIn side panel, does NOT reliably trigger LinkedIn's own apply-tracking / "Did you finish applying?" prompt** — same underlying failure as going straight to a direct ATS URL (see [job_apply_via_linkedin.md](job_apply_via_linkedin.md)). After an application was genuinely submitted this way, the LinkedIn listing still showed no "Applied" status and no Yes/No confirmation prompt. Correct order going forward: click **LinkedIn's own "Apply" button first** (step 3) to trigger its tracking flow, and only use a third-party autofill tool *on the resulting external form*, not as the initial entry point from the LinkedIn panel. If that autofill button is the only visible option and LinkedIn's own Apply button isn't present or doesn't lead anywhere useful, flag this to the user rather than silently accepting the tracking gap.
 
-## Skip taxonomy — how to decide fit
+## Skip taxonomy — final, radically simplified
 
-Two corrections stand as hard rules now, after being learned the hard way:
+This went through several rounds of correction (score-based skips → soft domain judgment → industry-mismatch nuance) before being cut down to one rule: **the only fit-judgment skip criterion is an explicit 7+ years YOE requirement stated in the JD.** If the JD states 7+ years, skip. If it states anything under 7, or states no YOE at all, apply.
 
-1. **Never use a browser-extension match score (e.g. a "Jobright"-style fit score) as the basis for a skip/apply decision.** The score is noise, not signal — every decision must be grounded in the actual job description text, read directly. If a listing's JD won't render (a known intermittent bug — see below), that's a reason to flag it as blocked, not a reason to fall back on the score.
-2. **For any role with an explicit years-of-experience requirement under 5 years, or no YOE stated at all, default to APPLYING** rather than skipping on a softer "this domain feels unfamiliar" judgment call.
-3. **When the JD's stated YOE requirement is under 5 years, disregard industry/domain-specific experience requirements too** — don't skip over a named industry (fintech, payments, ads, etc.) the same way you wouldn't skip over overall YOE. A candidate's adjacent industry background (e.g. a trading firm counting as financial-services/fintech-adjacent experience) should not be treated as disqualifying just because it isn't a literal industry match. This does not relax the separate "genuinely unfakeable capability requirements" skip category below — those are about capability, not industry background, and still apply regardless of stated YOE.
+Do not skip based on: title level (Principal/Staff/Director/VP/Head-of, Senior, etc.), out-of-scope-sounding function names, a named industry/domain vertical (fintech, payments, ads, security, healthcare, etc.), or a "this requires unfakeable expertise" judgment call. None of that decides fit anymore — YOE alone does. Never use a browser-extension match score (e.g. a "Jobright"-style fit score) as a factor either — it was never signal.
 
-Skips are reserved for:
-- Explicit 7+ years YOE stated in the JD
-- Principal/Staff/Director/VP/Head-of-level titles (including company-specific equivalents — e.g. a company's own pay bands showing a "Senior Manager" tier above Manager)
-- Out-of-scope functions: Technical Program Manager, Product Marketing Manager, Growth/Marketing leadership titles ("Head of Growth"), Strategy & Ops "Associate" titles that aren't product management at all
-- Staffing-agency/undisclosed-employer postings (log these, don't apply)
-- New-grad/future-start programs (not a current hire)
-- Genuinely unfakeable capability requirements stated explicitly in the JD itself — a required language the candidate doesn't speak, required hands-on custom software/engineering development (e.g. a "Forward Deployed" role requiring the candidate to personally configure/build integrations), or a required specific-firm consulting pedigree (e.g. McKinsey/BCG/Bain)
-- A named specialized industry/domain vertical (fintech, payments, ads, content moderation/trust & safety, KYC/compliance, etc.) stated as a minimum qualification — but only when the JD's stated YOE requirement is 5+ years; under a 5-year requirement, or no YOE stated, apply anyway per point 3 above
+**Two things are not fit-judgment calls and still stand as hard rules regardless of YOE:**
+- A posting from an agency/undisclosed employer, or one matching a known mass-job-posting scam pattern (the real hiring employer is never named): log/flag it, don't apply. This is about fraud/conflict risk, not fit.
+- A role at an employer where the candidate already holds an active internal position (e.g. currently an intern there): skip/flag it as an internal-mobility situation, not a normal external application.
+
+New-grad/future-start programs (a role the candidate can't actually start now) still don't make sense to apply to, but that's a logistics fact, not a fit judgment — flag it rather than silently skipping.
 
 **Known technical wrinkle:** listings tagged as having off-platform response handling have intermittently failed to render their job description body on LinkedIn (confirmed via DOM inspection, sometimes persisting even after a full page reload), while native-Apply listings promoted directly by the hirer have rendered reliably. When a JD won't render even after a retry/reload, flag the listing as **blocked** — don't skip it (no real basis to) and don't apply blind (can't tailor honestly against unread content).
 

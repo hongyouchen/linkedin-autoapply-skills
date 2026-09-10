@@ -20,6 +20,8 @@ Do not skip based on: title level (Principal/Staff/Director/VP/Head-of, Senior, 
 
 New-grad/future-start programs (a role the candidate can't actually start now) still don't make sense to apply to, but that's a logistics fact, not a fit judgment — flag it rather than silently skipping.
 
+**Known technical wrinkle: a hosting platform's own native "Apply" modal (opens as an in-page overlay, no new tab) may not allow its resume to be swapped by automation tools** — the resume-picker can live in a cross-origin sandboxed iframe with no accessible DOM. This differs from clicking through to an "Apply on company website" link, which opens the actual ATS in a genuine new tab that is fully accessible. Rule: if a listing's detail panel shows only a native in-page Apply button (no separate external-site link) and the resulting modal shows a pre-filled resume from an unrelated application, don't fight the sandboxing — deselect the wrong resume if possible, discard the draft without submitting, flag the listing as blocked (with the tailored resume still built and saved for manual follow-up), and move on quickly rather than spending many tool calls confirming the same failure repeatedly.
+
 **Known technical wrinkle:** listings tagged as having off-platform response handling have intermittently failed to render their job description body on LinkedIn (confirmed via DOM inspection, sometimes persisting even after a full page reload), while native-Apply listings promoted directly by the hirer have rendered reliably. When a JD won't render even after a retry/reload, flag the listing as **blocked** — don't skip it (no real basis to) and don't apply blind (can't tailor honestly against unread content).
 
 ## Per-job sequence, in order, no steps skipped

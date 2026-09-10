@@ -31,7 +31,7 @@ Skips are reserved for:
 
 2. **Tailor the resume per-JD.** Follow [resume_ats_tailoring.md](resume_ats_tailoring.md) in full — real tailoring against that specific job's actual JD every time. Never reuse another company's already-tailored bullets as a template, even under time pressure or high volume. This is a hard line, not a style preference (see the incident described in that file).
 
-3. **Apply via LinkedIn's own Apply button**, not by independently finding the company's direct ATS URL (Ashby/Greenhouse/etc.) and applying there. See [job_apply_via_linkedin.md](job_apply_via_linkedin.md) for why — going direct breaks LinkedIn's own apply-tracking flow, which is what step 6 below depends on.
+3. **Apply via LinkedIn's own Apply button**, not by independently finding the company's direct ATS URL (Ashby/Greenhouse/Rippling/etc.) and applying there. See [job_apply_via_linkedin.md](job_apply_via_linkedin.md) for why — going direct breaks LinkedIn's own apply-tracking flow, which is what step 6 below depends on.
 
 4. **Use a third-party "Apply with Autofill" browser tool when it's present on the listing** to speed through the external application form rather than manually typing every field. **Exact order matters, learned the hard way:** click Autofill *first*, then upload/replace the résumé field with the freshly tailored one from step 2 *after* Autofill finishes — if the tailored résumé is uploaded before running Autofill, Autofill silently overwrites it with whatever generic resume it has stored, discarding the tailored one. **Immediately before hitting submit, re-check the résumé field one more time** (visually confirm the filename shown is the tailored one, not the generic default) — this final check is mandatory even if the résumé was already swapped earlier in the flow, since some forms re-run autofill logic or reset on other field changes. Never trust a single earlier upload as sufficient.
 
@@ -43,7 +43,7 @@ Skips are reserved for:
 
 ## Sheet logging is strictly a fallback, never a substitute for applying
 
-Log a job to an application-tracking sheet only when it is a genuine fit (real JD read, passes the skip taxonomy) **and** its application is not supported by the ATS platforms the agent can actually complete (e.g. a company's own career-site form that's inaccessible/unreadable, or an "Apply on company website" link that goes nowhere the tools can reach). If the ATS is actually reachable for a genuine fit, apply through it — never log it instead just because logging is faster. This was corrected explicitly after a session logged genuine-fit jobs to the sheet as a shortcut when it should have kept trying to apply.
+Log a job to an application-tracking sheet only when it is a genuine fit (real JD read, passes the skip taxonomy) **and** its application is not supported by the ATS platforms the agent can actually complete (Ashby, Greenhouse, and Rippling are all directly supported, alongside LinkedIn's own Apply flow) — e.g. a company's own career-site form that's inaccessible/unreadable, or an "Apply on company website" link that goes nowhere the tools can reach. If the ATS is actually reachable for a genuine fit, apply through it — never log it instead just because logging is faster. This was corrected explicitly after a session logged a genuine-fit job hosted on Rippling to the sheet instead of applying, before the supported-ATS list was expanded to explicitly include Rippling.
 
 ## A listing already tagged "Applied" gets skipped immediately during browsing
 

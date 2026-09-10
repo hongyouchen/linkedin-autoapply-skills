@@ -45,6 +45,10 @@ Skips are reserved for:
 
 Log a job to an application-tracking sheet only when it is a genuine fit (real JD read, passes the skip taxonomy) **and** its application is not supported by the ATS platforms the agent can actually complete (Ashby, Greenhouse, and Rippling are all directly supported, alongside LinkedIn's own Apply flow) — e.g. a company's own career-site form that's inaccessible/unreadable, or an "Apply on company website" link that goes nowhere the tools can reach. If the ATS is actually reachable for a genuine fit, apply through it — never log it instead just because logging is faster. This was corrected explicitly after a session logged a genuine-fit job hosted on Rippling to the sheet instead of applying, before the supported-ATS list was expanded to explicitly include Rippling.
 
+## Never report a pass as complete until every results page has been checked
+
+Click through every page number shown at the bottom of the results list (1, 2, 3, ... Next) before giving any summary of applied/skipped/logged counts for a pass. A pass is not done just because the tight recent-postings window has been scrolled through once at the top of page 1 — the same window's results are paginated, and later pages can and do contain genuine unevaluated fits. This was learned the hard way after a session reported a pass complete having checked only page 1.
+
 ## A listing already tagged "Applied" gets skipped immediately during browsing
 
 No re-evaluation, no re-reading its JD, no re-tailoring. This is the same rule as step 1 above, restated because it applies at the browsing stage, before a listing is ever opened for evaluation.

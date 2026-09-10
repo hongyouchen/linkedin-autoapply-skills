@@ -8,6 +8,23 @@ A new session with no prior context should read this file (and the linked files)
 
 **Discovered: a third-party "Apply with Autofill" browser-extension button, clicked directly from the LinkedIn side panel, does NOT reliably trigger LinkedIn's own apply-tracking / "Did you finish applying?" prompt** — same underlying failure as going straight to a direct ATS URL (see [job_apply_via_linkedin.md](job_apply_via_linkedin.md)). After an application was genuinely submitted this way, the LinkedIn listing still showed no "Applied" status and no Yes/No confirmation prompt. Correct order going forward: click **LinkedIn's own "Apply" button first** (step 3) to trigger its tracking flow, and only use a third-party autofill tool *on the resulting external form*, not as the initial entry point from the LinkedIn panel. If that autofill button is the only visible option and LinkedIn's own Apply button isn't present or doesn't lead anywhere useful, flag this to the user rather than silently accepting the tracking gap.
 
+## Skip taxonomy — how to decide fit
+
+Two corrections stand as hard rules now, after being learned the hard way:
+
+1. **Never use a browser-extension match score (e.g. a "Jobright"-style fit score) as the basis for a skip/apply decision.** The score is noise, not signal — every decision must be grounded in the actual job description text, read directly. If a listing's JD won't render (a known intermittent bug — see below), that's a reason to flag it as blocked, not a reason to fall back on the score.
+2. **For any role with an explicit years-of-experience requirement under 5 years, or no YOE stated at all, default to APPLYING** rather than skipping on a softer "this domain feels unfamiliar" judgment call.
+
+Skips are reserved for:
+- Explicit 7+ years YOE stated in the JD
+- Principal/Staff/Director/VP/Head-of-level titles (including company-specific equivalents — e.g. a company's own pay bands showing a "Senior Manager" tier above Manager)
+- Out-of-scope functions: Technical Program Manager, Product Marketing Manager, Growth/Marketing leadership titles ("Head of Growth"), Strategy & Ops "Associate" titles that aren't product management at all
+- Staffing-agency/undisclosed-employer postings (log these, don't apply)
+- New-grad/future-start programs (not a current hire)
+- Genuinely unfakeable requirements stated explicitly in the JD itself — a required language the candidate doesn't speak, required hands-on custom software/engineering development (e.g. a "Forward Deployed" role requiring the candidate to personally configure/build integrations), or a named specialized domain vertical (content moderation/trust & safety, KYC/compliance, etc.)
+
+**Known technical wrinkle:** listings tagged as having off-platform response handling have intermittently failed to render their job description body on LinkedIn (confirmed via DOM inspection, sometimes persisting even after a full page reload), while native-Apply listings promoted directly by the hirer have rendered reliably. When a JD won't render even after a retry/reload, flag the listing as **blocked** — don't skip it (no real basis to) and don't apply blind (can't tailor honestly against unread content).
+
 ## Per-job sequence, in order, no steps skipped
 
 1. **Check status first.** If the listing already shows "Applied" in the sidebar or job detail pane, skip it entirely — don't re-tailor, don't re-apply, don't touch it. Only act on "Viewed," "Saved," or no-status listings. (A prior session started re-processing jobs already marked Applied — don't repeat that.)
@@ -20,9 +37,17 @@ A new session with no prior context should read this file (and the linked files)
 
 5. **Close the redirect tab after submitting**, without resubmitting the application a second time.
 
-6. **Go back to the LinkedIn listing and confirm "Yes" on the "Did you finish applying?" prompt.** This is mandatory, not optional — it's the only thing that actually marks the job "Applied" in the user's tracker; skipping it leaves the job stuck in "In progress" looking unapplied even though it was submitted. If the first click doesn't visibly register (a toast notification can cover the Yes/No buttons right after clicking Apply), click Yes again and verify the listing now shows "Applied" before moving on.
+6. **Go back to the LinkedIn listing and confirm "Yes" on the "Did you finish applying?" prompt.** This is mandatory, not optional — it's the only thing that actually marks the job "Applied" in the user's tracker; skipping it leaves the job stuck in "In progress" looking unapplied even though it was submitted. Only report something as "Applied" once this Yes click is actually confirmed — a successful ATS submission alone is not enough. If the first click doesn't visibly register (a toast notification can cover the Yes/No buttons right after clicking Apply), click Yes again and verify the listing now shows "Applied" before moving on. **If the "Did you finish applying?" prompt is not visible at all** on the original LinkedIn job posting tab: click that listing's LinkedIn Apply button once more (this reopens the application tab/flow), then switch away from that newly-opened tab back to the original LinkedIn posting tab — the "Did you finish applying?" prompt should now appear there, and click Yes. Don't guess at an alternative sequence — this exact fallback was specified explicitly after a session got this wrong.
 
 7. **Keep a running tally** of every company applied to in the session, and flag anything unusual (no matching listing found, application form failed, a JD requirement that would require fabricating experience, autofill attaching the wrong resume) for the user to review — don't silently skip or guess on these, per [never_deviate_from_instructions.md](never_deviate_from_instructions.md).
+
+## Sheet logging is strictly a fallback, never a substitute for applying
+
+Log a job to an application-tracking sheet only when it is a genuine fit (real JD read, passes the skip taxonomy) **and** its application is not supported by the ATS platforms the agent can actually complete (e.g. a company's own career-site form that's inaccessible/unreadable, or an "Apply on company website" link that goes nowhere the tools can reach). If the ATS is actually reachable for a genuine fit, apply through it — never log it instead just because logging is faster. This was corrected explicitly after a session logged genuine-fit jobs to the sheet as a shortcut when it should have kept trying to apply.
+
+## A listing already tagged "Applied" gets skipped immediately during browsing
+
+No re-evaluation, no re-reading its JD, no re-tailoring. This is the same rule as step 1 above, restated because it applies at the browsing stage, before a listing is ever opened for evaluation.
 
 ## Between 30-minute-window passes, also scan the past month
 

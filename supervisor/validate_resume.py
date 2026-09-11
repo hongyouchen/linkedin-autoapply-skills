@@ -24,6 +24,7 @@ FILL_MIN = 0.87       # core is 0.914; healthy tailored files 0.89-0.92; thinned
 LEN_MIN = 0.80        # fraction of core text length
 SPECIFICS_MIN = 0.90  # fraction of core numeric specifics that must appear
 TRACE_MIN = 0.60      # min difflib ratio of a tailored bullet to its closest core bullet
+MIN_CHANGED = 3       # at least this many work bullets must carry a JD-specific insertion
 
 ROLE_KEYS = [  # (key, matcher on header line lowercased)
     ('gusto', lambda h: 'gusto' in h),
@@ -204,6 +205,12 @@ def validate(pdf, core=None, check_dupes=True):
             if best < TRACE_MIN: untraced.append((r, round(best, 2), b[:90]))
     info['untraced_bullets'] = untraced
     if untraced: fails.append("bullets rewritten from scratch (no close match in core): " + '; '.join(f"[{r} {s}] {t}" for r, s, t in untraced))
+    # tailoring depth: the keyword-gap technique touches one bullet per missing keyword, so a resume whose
+    # bullets are all verbatim core with only the summary swapped is a template, not a tailored resume.
+    core_norm = {norm(b) for b in core_b}
+    changed = sum(1 for r in WORK_ROLES for b in p['roles'].get(r, []) if norm(b) not in core_norm)
+    info['bullets_changed_vs_core'] = changed
+    if changed < MIN_CHANGED: fails.append(f"only {changed} work bullet(s) differ from core (need >= {MIN_CHANGED}); this is core.pdf with a swapped summary, not a per-JD tailoring. Insert this JD's missing keywords into bullets (one per bullet).")
     # dupes
     if check_dupes:
         h = hashlib.sha1(norm(p['summary'] + ' ' + ' '.join(b for r in WORK_ROLES for b in p['roles'].get(r, []))).encode()).hexdigest()

@@ -85,10 +85,17 @@ def audit_transcript(path, since, core):
             F('LOW', e['t'], 'Claimed a listing did not load (verify: these claims were wrong twice)', e['text'][:200])
     pages = sorted({int(m.group(1)) for e in ev if e['tool'] == 'navigate' for m in [re.search(r'[?&]start=(\d+)', e.get('url', ''))] if m})
 
-    html_writes = [e for e in ev if e['tool'] == 'Write' and e['path'].lower().endswith('.html') and e.get('resume_html', 0) >= 1]
-    for i in range(len(html_writes) - 1):
-        if html_writes[i + 1]['t'] - html_writes[i]['t'] < 45:
-            F('HIGH', html_writes[i + 1]['t'], 'Two resumes authored within 45s (batching, not individual authoring)', os.path.basename(html_writes[i + 1]['path']))
+    # batch authoring: several distinct resume HTML files touched (Write or Edit) inside one 90s window,
+    # or a render command that renders more than one file
+    html_touch = [e for e in ev if e['tool'] in ('Write', 'Edit') and e['path'].lower().endswith(('.html', '.htm'))]
+    for i, e in enumerate(html_touch):
+        window = {x['path'] for x in html_touch[i:] if x['t'] - e['t'] <= 90}
+        if len(window) >= 3:
+            F('HIGH', e['t'], f'{len(window)} different resume HTML files edited within 90s (batch authoring, not one at a time)', ', '.join(sorted(os.path.basename(p) for p in window))[:200])
+            break
+    for e in ev:
+        if e['tool'] == 'Bash' and e.get('render') and (re.search(r'\bfor\b.*\b(do|in)\b', e.get('cmd', '')) or e.get('cmd', '').count('print-to-pdf') > 1):
+            F('HIGH', e['t'], 'Rendered several resumes in one command (batch)', e['cmd'][:160])
 
     # per-application checks
     prev_t = since
@@ -214,6 +221,8 @@ def main():
     print(json.dumps(summary, default=str))
     for f in sorted(all_f, key=lambda f: SEV_ORDER.index(f['sev']))[:30]:
         print(f"  [{f['sev']}] {fmt(f['t'])} {f['what']} :: {f['detail'][:140]}")
+    print(f"SUMMARY: {summary['applications']} apps, {summary['findings']} findings ({summary['critical']} critical), "
+          f"{summary['resumes_failing']}/{summary['resumes_written']} resumes failing" + (", WORKER HALTED" if halted else ""))
 
 
 if __name__ == '__main__':

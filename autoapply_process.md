@@ -12,11 +12,11 @@ A new session with no prior context should read this file (and the linked files)
 
 LinkedIn's `f_TPR=r1800` (30-minute) URL parameter is no longer honored by LinkedIn — confirmed directly by the user testing the exact search URL themselves. LinkedIn silently applies a "past 24 hours" filter instead, regardless of the `r1800` param in the URL; the UI's own filter dropdown no longer even lists a 30-minute preset, only 24h/week/month. This means a "30-minute pass" actually re-scans the entire day's postings each time (99+ results, 4-5+ pages), mostly re-surfacing listings already handled by earlier passes.
 
-**Standing cadence, exact:**
-1. Run one full pass per token-limit reset cycle (roughly every 5 hours) instead of every 30 minutes. Do not fire more often than that expecting a tighter window — there isn't one anymore.
-2. Within that one pass, **page through every results page to the end** (1, 2, 3, 4... until "Next" is gone or a page repeats the previous one) — a wider window means more real content to miss by stopping early, not less reason to check it all.
-3. For every listing that does not already show "Applied," actually evaluate it against the skip taxonomy and act on it in that same pass — apply, log, or skip with a stated reason. Do not defer unapplied listings to "the next pass"; a pass is not complete until every not-yet-applied listing across every page has been genuinely evaluated and acted on, not merely noticed.
-4. If LinkedIn's 30-minute filtering is ever confirmed working again, revisit this cadence rather than silently reverting.
+**Standing cadence, exact — corrected after the assistant clarified it has no way to detect a token/usage-limit reset.** A model running this process cannot autodetect a token-limit reset — that's outside its visibility. So cadence can't be "wait for reset, then run a pass." It has to be: always either mid-pass or about to start one, never losing place. Exact logic:
+1. A "pass" = one full sweep: every results page paged through to the end, every not-yet-applied listing on those pages genuinely evaluated and acted on (applied, logged, or skipped with a stated reason).
+2. When invoked again (whether the recurring prompt fired again, or a session resumed after being cut off), first check the running pass log for whether the most recent pass is marked complete or was left mid-page. **If a pass is in progress and incomplete, resume that exact same pass from where it left off** — same page, same not-yet-evaluated listings — never restart from page 1 and never treat a time gap as the start of a new pass. Running out of tokens mid-pass is an interruption to resume from, not a pass boundary.
+3. **Only start a genuinely new pass (fresh navigation to page 1) once the current pass has been fully completed.** If a pass finishes with tokens/time still available, start the next full pass immediately — there is no fixed timer to wait for; passes run back-to-back, gated only by actually finishing the previous one.
+4. If LinkedIn's 30-minute filtering is ever confirmed working again, revisit this whole cadence approach rather than silently reverting to it.
 
 ## Skip taxonomy — final, radically simplified
 

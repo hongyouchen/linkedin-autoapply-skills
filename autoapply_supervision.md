@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: ef5127f1-54da-483e-aa37-4e9fc596b501
-  modified: 2026-09-11T23:53:02.745Z
+  modified: 2026-09-11T23:56:07.811Z
 ---
 
 Andy installed an external supervisor on 2026-09-11 because prose rules failed twice (templated resumes 2026-09-01, generator-thinned resumes 2026-09-11; the thinning actually began ~2026-09-05). The supervisor is mechanical and lives outside the worker, in `~/.claude/autoapply/`. It applies to any session whose first user message is the autoapply cron prompt or a continuation of it, plus session ids listed in `worker_sessions.txt`. See [[autoapply_process]], [[hard_rule_no_resume_shortcuts]], [[never_deviate_from_instructions]].
@@ -18,7 +18,7 @@ Andy installed an external supervisor on 2026-09-11 because prose rules failed t
 3. Append one JSON line to `~/.claude/autoapply/ledger.jsonl`:
    `{"ts": <unix seconds>, "company": "Waymo", "title": "Group Product Manager", "linkedin_url": "https://www.linkedin.com/jobs/view/4456084325/", "jd_path": "/Users/hongyouchen/.claude/autoapply/jd/Waymo.txt", "resume_path": "/Users/hongyouchen/Downloads/Claude Resumes/Resume - Waymo (Group Product Manager).pdf", "apply_path": "linkedin_apply_company_site"}`
    `company` must be the first word of the resume filename; `linkedin_url` must be a linkedin.com/jobs URL; entry must be less than 4 hours old at upload time.
-4. Upload via file_upload. The hook runs `bin/validate_resume.py` on the PDF (1 page; page fill >= 0.87; Gusto 3 and Wingman 4 bullets exactly, total work bullets >= core total - 1; >= 90% of core's numeric specifics present; every work bullet has difflib ratio >= 0.6 to a core bullet; not identical in summary+bullets to another company's file). A failing PDF is blocked with the exact reasons; rebuild it, never upload a different file to get past the gate.
+4. Upload via file_upload. The hook runs `bin/validate_resume.py` on the PDF (1 page; page fill >= 0.87; Gusto 3 and Wingman 4 bullets exactly, total work bullets >= core total - 1; >= 90% of core's numeric specifics present; every work bullet has difflib ratio >= 0.6 to a core bullet; at least 3 work bullets carry a JD-specific insertion, so core.pdf with only a swapped summary fails; not identical in summary+bullets to another company's file). A failing PDF is blocked with the exact reasons; rebuild it, never upload a different file to get past the gate. Rendering more than one HTML in a command, or a loop that copies one base HTML to many files, is blocked too: one resume at a time, each visually checked before the next starts.
 5. Submit. A `find` query or typed text containing "submit" is blocked unless a validated upload happened in the last 3 hours that is not yet marked submitted. After submitting, append `{"ts":..., "event":"submitted", "resume_path": "...", "company": "..."}` to the ledger, then do the LinkedIn "Did you finish applying? Yes" step.
 
 **What else is blocked in worker sessions:** navigate/JS/`open` to ATS domains (ashbyhq, greenhouse, rippling, lever, workday, etc.: reach forms only via LinkedIn's Apply button; reload an ATS tab with cmd+r via the computer tool); Write/Edit/Bash creating any script or data file that carries resume content for 2+ employers, or an HTML file with more than one resume; AskUserQuestion during a pass (write `FLAG: ...` to the pass log instead); any browser/computer/Bash tool while `~/.claude/autoapply/HALT` exists (write `PASS HALTED <reason>` to the log and stop; Andy deletes HALT to resume).

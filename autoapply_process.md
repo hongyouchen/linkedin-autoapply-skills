@@ -12,7 +12,11 @@ A new session with no prior context should read this file (and the linked files)
 
 LinkedIn's `f_TPR=r1800` (30-minute) URL parameter is no longer honored by LinkedIn — confirmed directly by the user testing the exact search URL themselves. LinkedIn silently applies a "past 24 hours" filter instead, regardless of the `r1800` param in the URL; the UI's own filter dropdown no longer even lists a 30-minute preset, only 24h/week/month. This means a "30-minute pass" actually re-scans the entire day's postings each time (99+ results, 4-5+ pages), mostly re-surfacing listings already handled by earlier passes.
 
-**Standing cadence: run one full pass per token-limit reset cycle (roughly every 5 hours) instead of every 30 minutes.** Do not fire more often than that expecting a tighter window — there isn't one anymore. If LinkedIn's 30-minute filtering is ever confirmed working again, revisit this cadence rather than silently reverting.
+**Standing cadence, exact:**
+1. Run one full pass per token-limit reset cycle (roughly every 5 hours) instead of every 30 minutes. Do not fire more often than that expecting a tighter window — there isn't one anymore.
+2. Within that one pass, **page through every results page to the end** (1, 2, 3, 4... until "Next" is gone or a page repeats the previous one) — a wider window means more real content to miss by stopping early, not less reason to check it all.
+3. For every listing that does not already show "Applied," actually evaluate it against the skip taxonomy and act on it in that same pass — apply, log, or skip with a stated reason. Do not defer unapplied listings to "the next pass"; a pass is not complete until every not-yet-applied listing across every page has been genuinely evaluated and acted on, not merely noticed.
+4. If LinkedIn's 30-minute filtering is ever confirmed working again, revisit this cadence rather than silently reverting.
 
 ## Skip taxonomy — final, radically simplified
 
@@ -30,7 +34,11 @@ New-grad/future-start programs (a role the candidate can't actually start now) s
 
 **CORRECTED — the "JD won't render" claim below was WRONG. It was a rookie mistake, not a real platform issue.** There is no rendering failure. The job description loads asynchronously (a second request after the page shell renders), and the mistake was reading the page's text content only 1-2 seconds after navigating — catching it mid-load, still showing skeleton placeholders, and wrongly concluding the listing was "blocked." This was caught when the user screenshotted the exact same listing on their own machine and showed the JD fully rendered. Re-testing the identical URL confirmed it: at 2 seconds, nothing but skeletons; waiting 5 more seconds, the full job description loaded normally, no extra action needed. This false pattern caused an entire pass — and most of a second pass — to wrongly flag dozens of listings as "blocked" instead of ever actually evaluating them against the skip taxonomy, meaning real fit-or-skip judgments never got made on a large batch of listings.
 
-**Rule going forward, non-negotiable:** After navigating to or opening any listing, wait at least 5-8 seconds before reading page content or judging whether a JD is present. If the JD section is still just skeleton/placeholder content at that point, wait an additional 5 seconds and check again — never conclude anything from a single check taken within a couple seconds of page load. Only treat a listing as a genuine rendering failure after at least two waited checks (10+ seconds combined) still show zero JD content, and even then, report it as a low-confidence flag, not as an established platform-wide finding.
+**Rule going forward, exact steps, non-negotiable:**
+1. After navigating to or opening any listing, wait at least 5-8 seconds before reading page content or judging whether a JD is present — the async load, not a click, is what was actually missing.
+2. **Do not click the "…more" truncation toggle** that appears under collapsed "About the company…" text. It is a visual-only CSS clamp, not a content gate: the full underlying text is present in the page regardless of whether "…more" has been clicked — confirmed directly by testing (the complete job description came back after only waiting longer, with "…more" never clicked). Clicking it wastes effort and fixes nothing; the fix is exclusively about waiting for the async JD load, never about interacting with "…more".
+3. If the JD section is still just skeleton/placeholder content after that first wait, wait an additional 5 seconds and check again — never conclude anything from a single check taken within a couple seconds of page load.
+4. Only treat a listing as a genuine rendering failure after at least two waited checks (10+ seconds combined) still show zero JD content, and even then, report it as a low-confidence flag, not as an established platform-wide finding.
 
 ## Per-job sequence, in order, no steps skipped
 

@@ -1,0 +1,28 @@
+---
+name: autoapply_supervision
+description: "Supervision layer installed 2026-09-11 around the autoapply worker: PreToolUse/Stop guard hooks, the resume validator gate, the per-application ledger the worker must write, the HALT flag, and the scheduled auditor. Read before any autoapply pass; explains what will be blocked and what evidence must exist before an upload or submit."
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: ef5127f1-54da-483e-aa37-4e9fc596b501
+  modified: 2026-09-11T23:53:02.745Z
+---
+
+Andy installed an external supervisor on 2026-09-11 because prose rules failed twice (templated resumes 2026-09-01, generator-thinned resumes 2026-09-11; the thinning actually began ~2026-09-05). The supervisor is mechanical and lives outside the worker, in `~/.claude/autoapply/`. It applies to any session whose first user message is the autoapply cron prompt or a continuation of it, plus session ids listed in `worker_sessions.txt`. See [[autoapply_process]], [[hard_rule_no_resume_shortcuts]], [[never_deviate_from_instructions]].
+
+**Why:** the failure shape is always the same: a volume/pace goal makes a shortcut look reasonable, the worker takes it silently, its own check only validates the shortcut's output, and Andy finds out after irreversible submissions. Hooks run in the harness before a tool call executes, so the worker cannot reason its way past them; the auditor reads the transcript, so silent deviations are found within two hours instead of days.
+
+**How to apply — the ledger protocol, mandatory per application (the upload hook enforces it):**
+1. After reading the JD (get_page_text on the LinkedIn listing, after the load/reload rule), save the full "About the job" text to `~/.claude/autoapply/jd/<Company>.txt` (at least 400 chars). Do this BEFORE building the resume; the hook rejects a JD file newer than the PDF.
+2. Build the resume individually from `resume core.pdf`, render, and visually check it with Read.
+3. Append one JSON line to `~/.claude/autoapply/ledger.jsonl`:
+   `{"ts": <unix seconds>, "company": "Waymo", "title": "Group Product Manager", "linkedin_url": "https://www.linkedin.com/jobs/view/4456084325/", "jd_path": "/Users/hongyouchen/.claude/autoapply/jd/Waymo.txt", "resume_path": "/Users/hongyouchen/Downloads/Claude Resumes/Resume - Waymo (Group Product Manager).pdf", "apply_path": "linkedin_apply_company_site"}`
+   `company` must be the first word of the resume filename; `linkedin_url` must be a linkedin.com/jobs URL; entry must be less than 4 hours old at upload time.
+4. Upload via file_upload. The hook runs `bin/validate_resume.py` on the PDF (1 page; page fill >= 0.87; Gusto 3 and Wingman 4 bullets exactly, total work bullets >= core total - 1; >= 90% of core's numeric specifics present; every work bullet has difflib ratio >= 0.6 to a core bullet; not identical in summary+bullets to another company's file). A failing PDF is blocked with the exact reasons; rebuild it, never upload a different file to get past the gate.
+5. Submit. A `find` query or typed text containing "submit" is blocked unless a validated upload happened in the last 3 hours that is not yet marked submitted. After submitting, append `{"ts":..., "event":"submitted", "resume_path": "...", "company": "..."}` to the ledger, then do the LinkedIn "Did you finish applying? Yes" step.
+
+**What else is blocked in worker sessions:** navigate/JS/`open` to ATS domains (ashbyhq, greenhouse, rippling, lever, workday, etc.: reach forms only via LinkedIn's Apply button; reload an ATS tab with cmd+r via the computer tool); Write/Edit/Bash creating any script or data file that carries resume content for 2+ employers, or an HTML file with more than one resume; AskUserQuestion during a pass (write `FLAG: ...` to the pass log instead); any browser/computer/Bash tool while `~/.claude/autoapply/HALT` exists (write `PASS HALTED <reason>` to the log and stop; Andy deletes HALT to resume).
+
+**Pass log protocol (Stop hook enforces it):** the canonical log is now `~/.claude/autoapply/cron_pass_log.txt` (the old copy lived in a session scratchpad under /private/tmp, which is not durable). Start every pass with a line `PASS START <YYYY-MM-DD HHMM> <window>`; end it with `PASS COMPLETE <same id> applied=N logged=N skipped=N blocked=N` only after every results page is done. The Stop hook refuses to end the turn while the latest PASS START has no COMPLETE/TERMINATED/`PAUSED budget:` line. `PASS TERMINATED <id> <reason>` is for Andy stopping it; `PASS PAUSED budget: <exact page and listing to resume from>` only when tokens are genuinely exhausted (the auditor reports every pause).
+
+**Auditor:** `bin/audit.sh` runs every 2 hours via launchd (`com.andy.autoapply-audit`), checks each APPLIED entry for evidence (core.pdf re-read, JD read on a LinkedIn listing, HTML authored, PDF visually checked, upload, Yes-confirm), validates every resume written in the window, flags ATS bypasses, generators, batching (two resumes authored within 45s), asks, and "did not load" claims. Critical findings write HALT. Report: `~/Desktop/Autoapply Audits/latest.html` plus a macOS notification. Guard decisions are logged to `~/.claude/autoapply/guard_log.jsonl`.

@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""PreToolUse guard for the LinkedIn autoapply worker. Reads hook JSON on stdin.
+Blocks (exit 2 + reason on stderr) when a call would violate a standing rule.
+Only applies worker-scoped rules to sessions that look like autoapply worker sessions;
+the resume-upload validator applies everywhere.
+"""
+import sys, os, json, re, time, subprocess
+
+BASE = os.path.expanduser('~/.claude/autoapply')
+LEDGER = os.path.join(BASE, 'ledger.jsonl')
+HALT = os.path.join(BASE, 'HALT')
+LOG = os.path.join(BASE, 'guard_log.jsonl')
+VALIDATOR = os.path.join(BASE, 'bin', 'validate_resume.py')
+RESUME_DIR = os.path.expanduser('~/Downloads/Claude Resumes')
+ATS_RE = re.compile(r'https?://[^\s"\']*(ashbyhq\.com|greenhouse\.io|rippling\.com|lever\.co|myworkdayjobs\.com|workable\.com|smartrecruiters\.com|jobvite\.com|bamboohr\.com|icims\.com|wellfound\.com|avature\.net|successfactors\.com|applytojob\.com|breezy\.hr|dover\.com)', re.I)
+EMPLOYERS = ['gusto', 'wingman', 'olive capital', 'castleton', 'scottie ventures', 'goldman sachs']
+
+def log(kind, **kw):
+    try:
+        with open(LOG, 'a') as f: f.write(json.dumps(dict(ts=time.time(), kind=kind, **kw)) + '\n')
+    except Exception: pass
+
+def deny(reason, **kw):
+    log('BLOCK', reason=reason, **kw)
+    sys.stderr.write('AUTOAPPLY GUARD BLOCKED THIS CALL: ' + reason + '\n')
+    sys.exit(2)
+
+def walk(obj, path=''):
+    """yield (key_path, string) for every string in a nested JSON value."""
+    if isinstance(obj, dict):
+        for k, v in obj.items(): yield from walk(v, path + '/' + str(k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj): yield from walk(v, path + f'[{i}]')
+    elif isinstance(obj, str):
+        yield path, obj
+
+WORKER_RE = re.compile(r'recurring LinkedIn autoapply pass|auto-?apply campaign|autoapply_process\.md|Run the .{0,40}autoapply', re.I)
+
+def is_worker(h):
+    """A worker session is one registered in worker_sessions.txt, or whose FIRST user message is the
+    autoapply cron prompt / a continuation summary of it. Only the first user message is inspected so
+    other sessions that merely discuss the worker (like the supervisor) are not treated as workers."""
+    sid = h.get('session_id', '')
+    reg_path = os.path.join(BASE, 'worker_sessions.txt')
+    try:
+        reg = open(reg_path).read()
+        if sid and sid in reg: return True
+    except Exception: pass
+    tp = h.get('transcript_path') or ''
+    try:
+        with open(tp, 'rb') as f: head = f.read(400000).decode('utf-8', 'ignore')
+    except Exception:
+        return False
+    for line in head.splitlines():
+        try: o = json.loads(line)
+        except Exception: continue
+        if o.get('type') != 'user': continue
+        c = o.get('message', {}).get('content')
+        txt = c if isinstance(c, str) else ' '.join(x.get('text', '') for x in c if isinstance(x, dict) and x.get('type') == 'text')
+        if WORKER_RE.search(txt):
+            try:
+                with open(reg_path, 'a') as f: f.write(sid + '\n')
+            except Exception: pass
+            return True
+        return False
+    return False
+
+def ledger_entries():
+    out = []
+    try:
+        for line in open(LEDGER):
+            line = line.strip()
+            if line:
+                try: out.append(json.loads(line))
+                except Exception: pass
+    except FileNotFoundError: pass
+    return out
+
+def check_resume_upload(paths, h):
+    for p in paths:
+        if not p.lower().endswith('.pdf'): continue
+        if os.path.abspath(os.path.dirname(p)) != os.path.abspath(RESUME_DIR) and 'resume' not in os.path.basename(p).lower():
+            continue
+        if not os.path.exists(p): deny(f'resume file does not exist: {p}')
+        # 1. mechanical validation against core
+        r = subprocess.run([sys.executable, VALIDATOR, '--json', p], capture_output=True, text=True, timeout=120)
+        try: res = json.loads(r.stdout)
+        except Exception: deny(f'validator error on {os.path.basename(p)}: {r.stderr[-400:]}')
+        if not res['ok']:
+            deny(f'{os.path.basename(p)} FAILS resume validation against resume core.pdf: ' + ' | '.join(res['fails'])
+                 + '. Rebuild it individually from core.pdf at full depth (see hard_rule_no_resume_shortcuts). Do not upload a different file to get around this.')
+        # 2. ledger evidence: JD saved for this company before the resume was built
+        ents = [e for e in ledger_entries() if os.path.abspath(e.get('resume_path', '')) == os.path.abspath(p)]
+        if not ents:
+            deny(f'no ledger entry for {os.path.basename(p)}. Before uploading, append a JSON line to {LEDGER} with: company, title, linkedin_url (linkedin.com/jobs/view/...), jd_path (saved JD text under {BASE}/jd/), resume_path, apply_path. See autoapply_process.md "Supervision protocol".')
+        e = ents[-1]
+        url = e.get('linkedin_url', '')
+        if 'linkedin.com/jobs' not in url: deny(f'ledger entry for {os.path.basename(p)} has no LinkedIn job URL (got {url!r}); the apply flow must start from the LinkedIn listing.')
+        jd = e.get('jd_path', '')
+        if not jd or not os.path.exists(jd): deny(f'ledger jd_path missing or not found for {os.path.basename(p)}: {jd!r}. Save the JD text you read (get_page_text output) to a file first.')
+        jdtxt = open(jd, errors='ignore').read()
+        if len(jdtxt) < 400: deny(f'saved JD at {jd} is only {len(jdtxt)} chars; that is not a real job description. Re-read the listing (wait/reload per the loading rule) and save the full "About the job" text.')
+        if os.path.getmtime(jd) > os.path.getmtime(p) + 1: deny(f'JD file {os.path.basename(jd)} was written AFTER the resume PDF; the JD must be read before tailoring.')
+        comp = (e.get('company') or '').lower()
+        fn = os.path.basename(p).lower()
+        if comp and comp.split()[0] not in fn: deny(f'ledger company {comp!r} does not match resume filename {fn!r}')
+        if time.time() - e.get('ts', 0) > 4 * 3600: deny('ledger entry is older than 4 hours; write a fresh entry for this application.')
+        # stamp
+        try:
+            with open(LEDGER, 'a') as f: f.write(json.dumps(dict(ts=time.time(), event='validated_upload', resume_path=p, company=e.get('company'), session=h.get('session_id'))) + '\n')
+        except Exception: pass
+        log('ALLOW_UPLOAD', path=p, company=e.get('company'))
+
+BULLET_PHRASES = ['document generation', 'sales outreach', 'deal tracking', 'vector search', 'trading signals',
+                  'user interviews', 'icp templates', 'forecast error', 'cx cases', 'monthly page views', 'paying customers']
+DOC_PATHS = ('/memory/', 'linkedin-autoapply-skills', BASE)
+
+def looks_like_generator(text):
+    """Resume CONTENT for several employers (employer names plus actual bullet phrases), not merely a doc that names them."""
+    t = text.lower()
+    return sum(1 for k in EMPLOYERS if k in t) >= 2 and sum(1 for k in BULLET_PHRASES if k in t) >= 2
+
+def main():
+    h = json.load(sys.stdin)
+    tool = h.get('tool_name', '')
+    inp = h.get('tool_input', {}) or {}
+    strings = list(walk(inp))
+    worker = is_worker(h)
+
+    # --- HALT flag: auditor or Andy stopped the worker ---
+    if worker and os.path.exists(HALT) and (tool.startswith('mcp__claude-in-chrome__') or tool.startswith('mcp__computer-use__') or tool in ('Bash',)):
+        try: why = open(HALT).read().strip()
+        except Exception: why = ''
+        if not (tool == 'Bash' and 'cron_pass_log' in json.dumps(inp)):
+            deny(f'worker is HALTED by the supervisor: {why or "see ~/.claude/autoapply/HALT"}. Write "PASS HALTED <reason>" to cron_pass_log.txt and stop. Andy removes the HALT file to resume.')
+
+    # --- Resume upload gate (all sessions) ---
+    if tool == 'mcp__claude-in-chrome__file_upload':
+        check_resume_upload(inp.get('paths', []) or [], h)
+    if tool == 'mcp__claude-in-chrome__browser_batch':
+        for a in inp.get('actions', []) or []:
+            if a.get('name') in ('file_upload', 'mcp__claude-in-chrome__file_upload'):
+                check_resume_upload((a.get('input') or {}).get('paths', []) or [], h)
+
+    if not worker:
+        return
+
+    # --- No direct ATS navigation (must come from LinkedIn's Apply button) ---
+    for path, s in strings:
+        if ATS_RE.search(s):
+            if tool in ('mcp__claude-in-chrome__navigate', 'mcp__claude-in-chrome__browser_batch', 'mcp__claude-in-chrome__javascript_tool', 'Bash', 'mcp__claude-in-chrome__tabs_create_mcp'):
+                if tool == 'mcp__claude-in-chrome__browser_batch' and not re.search(r'/actions\[\d+\]/input/url$', path) and 'javascript' not in path:
+                    continue
+                if tool == 'Bash' and not re.search(r'\bopen\b|curl|wget', s): continue
+                deny(f'direct navigation to an ATS URL ({ATS_RE.search(s).group(0)[:80]}) is not allowed. Reach the application form only by clicking the Apply button on the LinkedIn listing (job_apply_via_linkedin). To reload an ATS tab, press the browser reload key (cmd+r) via the computer tool instead.')
+
+    # --- No resume generator scripts / batch content files ---
+    if tool in ('Write', 'Edit'):
+        fp = str(inp.get('file_path', ''))
+        content = str(inp.get('content', '') or inp.get('new_string', ''))
+        ext = os.path.splitext(fp)[1].lower()
+        if ext in ('.py', '.js', '.ts', '.sh', '.json', '.yaml', '.yml', '.csv', '.txt', '.md') and looks_like_generator(content) and 'cron_pass_log' not in fp and not any(d in fp for d in DOC_PATHS):
+            deny(f'{os.path.basename(fp)} contains resume content for multiple employers; batch resume generators and content files are forbidden (hard_rule_no_resume_shortcuts rule 3). Author each resume as its own HTML file, one at a time, from resume core.pdf.')
+        if ext in ('.html', '.htm') and content.lower().count('andy chen') > 2:
+            deny('an HTML file containing more than one resume is a batch; author one resume per file.')
+    if tool == 'Bash':
+        cmd = str(inp.get('command', ''))
+        if looks_like_generator(cmd) and re.search(r'cat\s*>|<<\s*[\'"]?\w+|tee\s|python3?\s+-c|\.py\b', cmd) and 'validate_resume' not in cmd:
+            deny('this shell command writes or runs a script carrying resume content for multiple employers; generators are forbidden. Render only: headless Chrome from a single hand-authored HTML file.')
+        if re.search(r'python3?\s+\S*gen\w*\.py', cmd): deny('running a resume generator script is forbidden.')
+
+    # --- Never stop a pass to ask ---
+    if tool == 'AskUserQuestion':
+        deny('AskUserQuestion is not allowed during an autoapply pass. Write the question/judgment call into cron_pass_log.txt as "FLAG: ..." and keep going (feedback_never_stop_passes).')
+
+    # --- Submit gate: a validated upload must exist for the current application ---
+    if tool in ('mcp__claude-in-chrome__find', 'mcp__claude-in-chrome__browser_batch', 'mcp__claude-in-chrome__javascript_tool', 'mcp__claude-in-chrome__computer'):
+        submit_like = any(re.search(r'\bsubmit(?!ted)', s, re.I) and 'linkedin.com' not in s for p, s in strings if p.endswith('/query') or p.endswith('/text'))
+        if submit_like:
+            ents = ledger_entries()
+            recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - e.get('ts', 0) < 3 * 3600]
+            submitted = {e.get('resume_path') for e in ents if e.get('event') == 'submitted'}
+            open_apps = [e for e in recent if e.get('resume_path') not in submitted]
+            if not open_apps:
+                deny('no validated resume upload is on record for an open application (ledger shows none in the last 3h that is not already marked submitted). Upload the validated tailored resume through file_upload first. If this is a LinkedIn native modal where the resume cannot be swapped, do not submit; flag the listing as blocked per autoapply_process.md.')
+            log('ALLOW_SUBMIT', open_apps=[e.get('company') for e in open_apps])
+
+if __name__ == '__main__':
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        log('GUARD_ERROR', err=str(e))
+        sys.stderr.write(f'autoapply guard internal error (call allowed): {e}\n')
+        sys.exit(0)

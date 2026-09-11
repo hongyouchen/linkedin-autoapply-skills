@@ -6,3 +6,7 @@ A small set of process docs ("skills") for running an AI coding agent (e.g. Clau
 - [resume_ats_tailoring.md](resume_ats_tailoring.md) — reusable process for tailoring a resume per-JD for ATS scoring: formatting rules, keyword-insertion technique. Hard rule at the top: never template/reuse content across companies.
 - [job_apply_via_linkedin.md](job_apply_via_linkedin.md) — when auto-applying to LinkedIn-sourced jobs, click LinkedIn's own Apply button, don't bypass straight to the underlying ATS.
 - [never_deviate_from_instructions.md](never_deviate_from_instructions.md) — the general standing rule behind all of the above: no unilateral process/quality/scope decisions; surface assumptions and tradeoffs before acting, not after.
+
+## Supervision layer
+
+`autoapply_supervision.md` describes the mechanical enforcement installed around the agent (PreToolUse/Stop hooks, resume validator, per-application ledger, HALT flag, scheduled auditor). The scripts live in `supervisor/` in this repo.

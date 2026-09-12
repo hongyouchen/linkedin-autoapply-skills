@@ -84,6 +84,8 @@ def audit_transcript(path, since, core):
             F('CRITICAL', e['t'], 'Fetched LinkedIn pages with curl/HTTP instead of the browser (Andy: read listings in the browser, job by job)', e['cmd'][:160])
         if e['tool'] == 'javascript_tool' and re.search(r'jobs-guest|fetch\([^)]*linkedin', e.get('js', ''), re.I):
             F('CRITICAL', e['t'], 'Fetched LinkedIn data via page JavaScript instead of reading listings in the browser', e['js'][:160])
+        if e['tool'] == 'read_network_requests' and re.search(r'voyager|jobs|linkedin', e.get('pattern', ''), re.I):
+            F('MEDIUM', e['t'], 'Read LinkedIn API responses from the browser network log instead of the rendered page (JD must come from get_page_text)', e.get('pattern', ''))
         if e['tool'] == 'AskUserQuestion':
             F('HIGH', e['t'], 'Stopped pass to ask a question', e.get('q', ''))
         if e['tool'] in ('Write', 'Edit') and e.get('employers', 0) >= 2 and not e['path'].lower().endswith(('.html', '.htm', '.md')):

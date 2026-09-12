@@ -32,6 +32,8 @@ def sub_events(name, inp, t, out):
         e['action'] = inp.get('action')
         if inp.get('text'):
             e['text'] = str(inp.get('text'))[:120]
+    elif name == 'read_network_requests':
+        e['pattern'] = str(inp.get('urlPattern', ''))[:60]
     elif name == 'form_input':
         e['value'] = str(inp.get('value'))[:80]
     elif name == 'javascript_tool':

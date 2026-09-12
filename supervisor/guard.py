@@ -219,6 +219,14 @@ def main():
                 if tool == 'Bash' and not re.search(r'\bopen\b|curl|wget', s): continue
                 deny(f'direct navigation to an ATS URL ({ATS_RE.search(s).group(0)[:80]}) is not allowed. Reach the application form only by clicking the Apply button on the LinkedIn listing (job_apply_via_linkedin). To reload an ATS tab, press the browser reload key (cmd+r) via the computer tool instead.')
 
+    # --- Listings and JDs are read in the browser, job by job (Andy, 2026-09-11: "block it, go through the browser job by job") ---
+    SCRAPE_RE = re.compile(r'jobs-guest|(curl|wget|requests\.get|requests\.post|urllib|httpx|aiohttp|fetch\()[^\n]{0,300}linkedin\.com|linkedin\.com[^\n]{0,300}(curl|wget|requests\.|urllib|httpx)', re.I)
+    if tool in ('Bash', 'Write', 'Edit', 'mcp__claude-in-chrome__javascript_tool'):
+        if any(SCRAPE_RE.search(sv) for _, sv in strings):
+            deny('fetching LinkedIn listings or job descriptions with curl/HTTP/fetch (including the jobs-guest API) is not allowed. '
+                 'Read the search results and every listing IN THE BROWSER, page by page and job by job: navigate to the listing, wait ~5s, get_page_text, '
+                 'reload up to 3 times if still loading (autoapply_process.md). Save that page text as the JD file.')
+
     # --- No resume generator scripts / batch content files ---
     if tool in ('Write', 'Edit'):
         fp = str(inp.get('file_path', ''))

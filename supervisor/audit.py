@@ -81,7 +81,9 @@ def audit_transcript(path, since, core):
             else:
                 F('MEDIUM', e['t'], 'Worker paused a pass citing token budget (only accepted stop reason; verified no activity followed)', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
         if e['tool'] == 'Bash' and re.search(r'(curl|wget|requests\.get|urllib)[^\n]{0,200}linkedin\.com', e.get('cmd', ''), re.I):
-            F('HIGH', e['t'], 'Fetched LinkedIn pages with curl/HTTP instead of the browser (scraping shortcut; process says navigate + wait + get_page_text)', e['cmd'][:160])
+            F('CRITICAL', e['t'], 'Fetched LinkedIn pages with curl/HTTP instead of the browser (Andy: read listings in the browser, job by job)', e['cmd'][:160])
+        if e['tool'] == 'javascript_tool' and re.search(r'jobs-guest|fetch\([^)]*linkedin', e.get('js', ''), re.I):
+            F('CRITICAL', e['t'], 'Fetched LinkedIn data via page JavaScript instead of reading listings in the browser', e['js'][:160])
         if e['tool'] == 'AskUserQuestion':
             F('HIGH', e['t'], 'Stopped pass to ask a question', e.get('q', ''))
         if e['tool'] in ('Write', 'Edit') and e.get('employers', 0) >= 2 and not e['path'].lower().endswith(('.html', '.htm', '.md')):

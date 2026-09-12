@@ -65,7 +65,9 @@ def audit_transcript(path, since, core):
     for e in ev:
         if e.get('log_text'):
             for m in re.finditer(r'APPLIED\s+([^\n(/]+?)(?:\s*\(|\s+via|\s+-|\n|$)', e['log_text']):
-                apps.append(dict(t=e['t'], company=m.group(1).strip()[:60]))
+                line_end = e['log_text'].find('\n', m.end()); line = e['log_text'][m.start():line_end if line_end > 0 else None]
+                jid = re.search(r'\b(\d{9,11})\b', line)
+                apps.append(dict(t=e['t'], company=m.group(1).strip()[:60], linkedin_url=(f'https://www.linkedin.com/jobs/view/{jid.group(1)}/' if jid else None)))
 
     # pass-level checks
     for e in ev:
@@ -172,16 +174,29 @@ def main():
     halted = False
     if crit and '--no-halt' not in args:
         halt_id = datetime.datetime.now().strftime('%Y%m%d-%H%M')
-        must_pass = sorted({os.path.join(RESUME_DIR, a['validation']['file']) for r in results for a in r['applications']
-                            if a.get('validation') and not a['validation']['ok']}
-                           | {os.path.join(RESUME_DIR, r['file']) for r in file_results if not r['ok']})
+        must_pass, seen = [], set()
+        for r in results:
+            for a in r['applications']:
+                if a.get('validation') and not a['validation']['ok']:
+                    fp = os.path.join(RESUME_DIR, a['validation']['file'])
+                    if fp in seen: continue
+                    seen.add(fp)
+                    must_pass.append(dict(company=a['company'], resume_path=fp, linkedin_url=a.get('linkedin_url'), resubmit=True))
+        for r in file_results:
+            fp = os.path.join(RESUME_DIR, r['file'])
+            if not r['ok'] and fp not in seen:
+                seen.add(fp); must_pass.append(dict(company=V.company_of(fp), resume_path=fp, linkedin_url=None, resubmit=False))
         must_flag = [c['what'] + ': ' + c['detail'][:120] for c in crit if 'FAILS validation' not in c['what']]
         halt = dict(id=halt_id, ts=time.time(), critical=[c['what'] + ': ' + c['detail'][:150] for c in crit[:10]],
                     must_pass=must_pass, must_flag=must_flag,
-                    how_to_clear=(f"1) Rebuild every file in must_pass individually from resume core.pdf with its JD open until "
-                                  f"`python3 ~/.claude/autoapply/bin/validate_resume.py <file>` passes. 2) If must_flag is non-empty, append one line "
+                    how_to_clear=(f"For each must_pass entry: 1) rebuild the resume individually from resume core.pdf with its JD open until "
+                                  f"`python3 ~/.claude/autoapply/bin/validate_resume.py <resume_path>` passes (browser stays blocked until ALL must_pass resumes pass). "
+                                  f"2) If resubmit is true: open the LinkedIn listing (linkedin_url, or find it by company+title; search-results pages stay blocked), "
+                                  f"click the job title, click the blue 'Go to company site' link under Application status, write a fresh ledger entry, upload the rebuilt resume, "
+                                  f"submit the application again, then append a ledger line {{\"event\":\"submitted\",\"resume_path\":...,\"company\":...,\"resubmission\":true}} "
+                                  f"and a log line 'RESUBMITTED <company>'. 3) If must_flag is non-empty, append one line "
                                   f"'REMEDIATED HALT {halt_id}: <what happened, which listings, what you did>' to ~/.claude/autoapply/cron_pass_log.txt. "
-                                  f"3) Run `python3 ~/.claude/autoapply/bin/clear_halt.py`; it removes HALT only when all conditions pass. Then resume the pass."))
+                                  f"4) Run `python3 ~/.claude/autoapply/bin/clear_halt.py`; it removes HALT only when every condition holds. Then continue the pass with the next listing."))
         json.dump(halt, open(os.path.join(BASE, 'HALT'), 'w'), indent=1)
         halted = True
     summary['halted'] = halted

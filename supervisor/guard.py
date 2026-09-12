@@ -76,6 +76,26 @@ def ledger_entries():
     except FileNotFoundError: pass
     return out
 
+HALT_CACHE = os.path.join(BASE, '.halt_cache.json')
+
+def halt_pending_resumes(halt):
+    """names of must_pass resumes that still fail (validator results cached by file mtime)."""
+    try: cache = json.load(open(HALT_CACHE))
+    except Exception: cache = {}
+    pending = []
+    for ent in halt.get('must_pass', []):
+        p = ent['resume_path'] if isinstance(ent, dict) else ent
+        if not os.path.exists(p): pending.append(os.path.basename(p) + ' (missing)'); continue
+        key = f"{p}@{os.path.getmtime(p)}"
+        if key not in cache:
+            r = subprocess.run([sys.executable, VALIDATOR, '--json', p], capture_output=True, text=True, timeout=120)
+            try: cache[key] = json.loads(r.stdout)['ok']
+            except Exception: cache[key] = False
+            try: json.dump(cache, open(HALT_CACHE, 'w'))
+            except Exception: pass
+        if not cache[key]: pending.append(os.path.basename(p))
+    return pending
+
 def check_resume_upload(paths, h):
     for p in paths:
         if not p.lower().endswith('.pdf'): continue
@@ -127,16 +147,27 @@ def main():
     strings = list(walk(inp))
     worker = is_worker(h)
 
-    # --- HALT flag: the worker must remediate, then run clear_halt.py; it cannot browse, submit, or delete the flag ---
+    # --- HALT flag: remediation mode. Browser opens only once every must_pass resume passes, and then only for
+    #     the listings being resubmitted; the flag itself can only be removed by clear_halt.py ---
+    halt = None
     if worker and os.path.exists(HALT):
-        try: hd = json.load(open(HALT)); why = f"HALT {hd.get('id')}: " + ' || '.join(hd.get('critical', [])[:3]) + '. ' + hd.get('how_to_clear', '')
-        except Exception: why = 'see ~/.claude/autoapply/HALT'
-        if tool.startswith('mcp__claude-in-chrome__') or tool.startswith('mcp__computer-use__'):
-            deny('worker is HALTED by the supervisor; no browser/desktop actions until cleared. ' + why)
+        try: halt = json.load(open(HALT))
+        except Exception: halt = dict(id='legacy', must_pass=[], critical=[open(HALT).read()[:200]], how_to_clear='')
+        why = f"HALT {halt.get('id')}: " + ' || '.join(halt.get('critical', [])[:3]) + '. ' + halt.get('how_to_clear', '')
         if tool == 'Bash' and re.search(r'\bHALT\b', str(inp.get('command', ''))) and 'clear_halt.py' not in str(inp.get('command', '')):
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
         if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).rstrip('/').endswith('/HALT'):
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
+        if tool.startswith('mcp__claude-in-chrome__') or tool.startswith('mcp__computer-use__'):
+            pending = halt_pending_resumes(halt)
+            if pending:
+                deny('worker is HALTED; browser stays closed until every must_pass resume passes the validator. Still failing: '
+                     + '; '.join(pending)[:500] + '. ' + why)
+            # remediation browsing: no search/results pages, no new listings
+            for path, sv in strings:
+                if re.search(r'linkedin\.com/(jobs/(search|collections)|jobs/?\?|feed)', sv, re.I):
+                    deny('HALT remediation mode: only the listings being resubmitted may be opened (their linkedin_url in HALT, or the job page reached by company+title). '
+                         'No search-results browsing until clear_halt.py has cleared the HALT. ' + why)
 
     # --- Resume upload gate (all sessions) ---
     if tool == 'mcp__claude-in-chrome__file_upload':
@@ -190,6 +221,10 @@ def main():
             recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - e.get('ts', 0) < 3 * 3600]
             submitted = {e.get('resume_path') for e in ents if e.get('event') == 'submitted'}
             open_apps = [e for e in recent if e.get('resume_path') not in submitted]
+            if halt:
+                mp = {os.path.abspath(e['resume_path'] if isinstance(e, dict) else e) for e in halt.get('must_pass', [])}
+                open_apps = [e for e in open_apps if os.path.abspath(e.get('resume_path', '')) in mp]
+                if not open_apps: deny('HALT remediation mode: only resubmissions of the must_pass resumes may be submitted, and the rebuilt resume must be uploaded through file_upload first.')
             if not open_apps:
                 deny('no validated resume upload is on record for an open application (ledger shows none in the last 3h that is not already marked submitted). Upload the validated tailored resume through file_upload first. If this is a LinkedIn native modal where the resume cannot be swapped, do not submit; flag the listing as blocked per autoapply_process.md.')
             log('ALLOW_SUBMIT', open_apps=[e.get('company') for e in open_apps])

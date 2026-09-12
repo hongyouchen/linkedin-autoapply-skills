@@ -15,13 +15,26 @@ def main():
     except Exception:
         h = dict(id='legacy', must_pass=[], must_flag=[open(HALT).read()[:200]])
     unmet = []
-    for p in h.get('must_pass', []):
+    try: ledger = [json.loads(l) for l in open(os.path.join(BASE, 'ledger.jsonl')) if l.strip()]
+    except Exception: ledger = []
+    for ent in h.get('must_pass', []):
+        if isinstance(ent, str): ent = dict(resume_path=ent, resubmit=False, company='')
+        p = ent['resume_path']
         if not os.path.exists(p):
             unmet.append(f'resume missing: {p}'); continue
         r = subprocess.run([sys.executable, VALIDATOR, '--json', p], capture_output=True, text=True)
         try: res = json.loads(r.stdout)
         except Exception: unmet.append(f'validator error on {p}'); continue
-        if not res['ok']: unmet.append(f'{os.path.basename(p)} still fails: ' + ' | '.join(res['fails'])[:300])
+        if not res['ok']:
+            unmet.append(f'{os.path.basename(p)} still fails: ' + ' | '.join(res['fails'])[:300]); continue
+        if ent.get('resubmit'):
+            ok = any(e.get('event') == 'submitted' and os.path.abspath(e.get('resume_path', '')) == os.path.abspath(p)
+                     and e.get('ts', 0) > h.get('ts', 0) for e in ledger)
+            if not ok:
+                unmet.append(f"{ent.get('company') or os.path.basename(p)}: rebuilt resume passes, but no resubmission recorded in ledger.jsonl "
+                             f"(need event 'submitted' for {os.path.basename(p)} dated after the HALT). Open the LinkedIn listing"
+                             + (f" ({ent['linkedin_url']})" if ent.get('linkedin_url') else '') +
+                             ", click the job title, click 'Go to company site', upload the rebuilt resume, submit, then record it.")
     if h.get('must_flag'):
         try: log = open(LOG, errors='ignore').read()
         except FileNotFoundError: log = ''

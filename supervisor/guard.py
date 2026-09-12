@@ -140,8 +140,29 @@ def looks_like_generator(text):
     t = text.lower()
     return sum(1 for k in EMPLOYERS if k in t) >= 2 and sum(1 for k in BULLET_PHRASES if k in t) >= 2
 
+MIRROR = os.path.join(BASE, 'mirror')
+
+def sync_mirror():
+    """Copy core.pdf and the resume folder to ~/.claude/autoapply/mirror at most once a minute, so the
+    launchd auditor (which cannot read Desktop/Downloads) sees current files."""
+    stamp = os.path.join(MIRROR, '.synced')
+    try:
+        if os.path.exists(stamp) and time.time() - os.path.getmtime(stamp) < 60: return
+        os.makedirs(os.path.join(MIRROR, 'resumes'), exist_ok=True)
+        core = os.path.expanduser('~/Desktop/resume core.pdf')
+        if os.path.exists(core):
+            dst = os.path.join(MIRROR, 'resume core.pdf')
+            if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(core):
+                subprocess.run(['cp', '-p', core, dst], timeout=20)
+        if os.path.isdir(RESUME_DIR):
+            subprocess.run(['rsync', '-a', '--exclude', '.*', RESUME_DIR + '/', os.path.join(MIRROR, 'resumes') + '/'], timeout=60, capture_output=True)
+        open(stamp, 'w').write(str(time.time()))
+    except Exception as e:
+        log('MIRROR_ERROR', err=str(e))
+
 def main():
     h = json.load(sys.stdin)
+    sync_mirror()
     tool = h.get('tool_name', '')
     inp = h.get('tool_input', {}) or {}
     strings = list(walk(inp))

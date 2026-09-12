@@ -16,7 +16,7 @@ import validate_resume as V  # noqa: E402
 import gmail_confirm as G  # noqa: E402
 
 PROJ = os.path.expanduser('~/.claude/projects/-Users-hongyouchen')
-RESUME_DIR = os.path.expanduser('~/Downloads/Claude Resumes')
+RESUME_DIR = V.RESUME_DIR  # real folder when readable, else the guard-maintained mirror
 REPORTS = os.path.join(BASE, 'reports')
 STATE = os.path.join(BASE, 'audit_state.json')
 ATS_RE = re.compile(r'(ashbyhq\.com|greenhouse\.io|rippling\.com|lever\.co|myworkdayjobs\.com|workable\.com|smartrecruiters\.com)', re.I)

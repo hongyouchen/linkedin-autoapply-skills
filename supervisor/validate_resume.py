@@ -16,8 +16,31 @@ Rules enforced (from hard_rule_no_resume_shortcuts.md):
 import sys, os, re, json, glob, difflib, hashlib, time
 import fitz
 
-CORE = os.path.expanduser('~/Desktop/resume core.pdf')
-RESUME_DIR = os.path.expanduser('~/Downloads/Claude Resumes')
+MIRROR = os.path.expanduser('~/.claude/autoapply/mirror')
+
+def _readable(p):
+    try:
+        with open(p, 'rb') as f: f.read(16)
+        return True
+    except Exception:
+        return False
+
+def resolve(p):
+    """Desktop/Downloads are TCC-protected: a launchd process cannot read them. The guard hook (which runs inside
+    Claude Code, with access) mirrors them under ~/.claude/autoapply/mirror; fall back to the twin path there."""
+    if _readable(p): return p
+    real_core = os.path.expanduser('~/Desktop/resume core.pdf'); real_dir = os.path.expanduser('~/Downloads/Claude Resumes')
+    if os.path.abspath(p) == os.path.abspath(real_core): return os.path.join(MIRROR, 'resume core.pdf')
+    if os.path.abspath(p).startswith(os.path.abspath(real_dir)): return os.path.join(MIRROR, 'resumes', os.path.basename(p))
+    return p
+
+CORE = resolve(os.path.expanduser('~/Desktop/resume core.pdf'))
+_RD = os.path.expanduser('~/Downloads/Claude Resumes')
+def _dir_readable(d):
+    try: return os.path.isdir(d) and any(True for _ in os.scandir(d))
+    except Exception: return False
+
+RESUME_DIR = _RD if _dir_readable(_RD) else os.path.join(MIRROR, 'resumes')
 CACHE = os.path.expanduser('~/.claude/autoapply/resume_index.json')
 
 FILL_MIN = 0.87       # core is 0.914; healthy tailored files 0.89-0.92; thinned 0.64-0.79
@@ -172,6 +195,7 @@ def company_of(path):
 def validate(pdf, core=None, check_dupes=True):
     core = core or load_core()
     fails, warns, info = [], [], {}
+    pdf = resolve(pdf)
     try:
         p = parse(pdf)
     except Exception as e:

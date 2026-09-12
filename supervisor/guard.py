@@ -217,10 +217,15 @@ def main():
     if not worker:
         return
 
-    # --- evidence integrity: the worker may not write hook-owned records ---
-    blob = json.dumps(inp)
-    if tool in ('Bash', 'Write', 'Edit') and re.search(r'validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|guard_log\.jsonl|\.halt_cache|gmail_cache|gmail_refresh', blob):
-        deny('these records are written by the supervisor hooks only; the worker may not create or edit them.')
+    # --- evidence integrity: the worker may not WRITE hook-owned records (reading them is fine) ---
+    PROTECTED = re.compile(r'validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|guard_log\.jsonl|\.halt_cache|gmail_cache|gmail_refresh\.json')
+    WRITE_OP = re.compile(r'>>|(?<![0-9<&>])>(?![&>])|\btee\b|sed\s+-i|\brm\b|\bmv\b|\bcp\b|\btruncate\b|\.write\(|\.dump\(|open\([^)]*["\'][wax]\+?["\']|write_text|shutil\.')
+    if tool == 'Bash':
+        cmd = str(inp.get('command', ''))
+        if PROTECTED.search(cmd) and WRITE_OP.search(cmd):
+            deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed).')
+    if tool in ('Write', 'Edit') and PROTECTED.search(json.dumps(inp)):
+        deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed).')
 
     # --- hook-observed remediation step: clicking the LinkedIn "Go to company site" link ---
     if any(re.search(r'go to company site', sv, re.I) for _, sv in strings):

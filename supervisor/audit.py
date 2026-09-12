@@ -80,6 +80,8 @@ def audit_transcript(path, since, core):
                 F('CRITICAL', e['t'], f'FALSE budget pause: worker claimed tokens were exhausted, then made {len(later)} more tool calls within 30 min', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
             else:
                 F('MEDIUM', e['t'], 'Worker paused a pass citing token budget (only accepted stop reason; verified no activity followed)', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
+        if e['tool'] == 'Bash' and re.search(r'(curl|wget|requests\.get|urllib)[^\n]{0,200}linkedin\.com', e.get('cmd', ''), re.I):
+            F('HIGH', e['t'], 'Fetched LinkedIn pages with curl/HTTP instead of the browser (scraping shortcut; process says navigate + wait + get_page_text)', e['cmd'][:160])
         if e['tool'] == 'AskUserQuestion':
             F('HIGH', e['t'], 'Stopped pass to ask a question', e.get('q', ''))
         if e['tool'] in ('Write', 'Edit') and e.get('employers', 0) >= 2 and not e['path'].lower().endswith(('.html', '.htm', '.md')):

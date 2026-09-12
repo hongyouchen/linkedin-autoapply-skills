@@ -13,6 +13,7 @@ BASE = os.path.expanduser('~/.claude/autoapply')
 sys.path.insert(0, os.path.join(BASE, 'bin'))
 from extract_events import extract  # noqa: E402
 import validate_resume as V  # noqa: E402
+import gmail_confirm as G  # noqa: E402
 
 PROJ = os.path.expanduser('~/.claude/projects/-Users-hongyouchen')
 RESUME_DIR = os.path.expanduser('~/Downloads/Claude Resumes')
@@ -100,6 +101,7 @@ def audit_transcript(path, since, core):
             F('HIGH', e['t'], 'Rendered several resumes in one command (batch)', e['cmd'][:160])
 
     # per-application checks
+    gmail_threads = G.confirmations() if apps else []
     prev_t = since
     for a in apps:
         w = [e for e in ev if prev_t < e['t'] <= a['t'] + 900]
@@ -113,7 +115,17 @@ def audit_transcript(path, since, core):
             'resume_uploaded': any(e['tool'] == 'file_upload' and any('Claude Resumes' in p for p in e.get('paths', [])) for e in wb),
             'linkedin_yes_confirmed': any(e['tool'] == 'find' and re.search(r'finish applying|did you finish|\byes\b', e.get('query', ''), re.I) for e in w)
             or any(e['tool'] == 'ASSISTANT_TEXT' and re.search(r'finish applying.*yes|clicked yes|applied badge|shows applied', e['text'], re.I) for e in w),
+            'success_screen_reported': any(e['tool'] == 'ASSISTANT_TEXT' and re.search(r'application (was )?submitted|submitted successfully|thank you for (applying|your application)|confirmation (page|screen)|/confirmation', e['text'], re.I) for e in w),
         }
+        # Gmail: every real submission produces a confirmation email (Andy, 2026-09-11)
+        age_min = (time.time() - a['t']) / 60
+        mail = G.confirmed(a['company'], a['t'], gmail_threads)
+        checks['gmail_confirmation'] = bool(mail)
+        a['gmail'] = dict(subject=mail.get('subject'), from_=mail.get('from'), date=mail.get('date')) if mail else None
+        if not mail and age_min > 90:
+            F('CRITICAL', a['t'], f"{a['company']}: no confirmation email in Gmail {int(age_min)} min after APPLIED", 'either the application never actually went through, or the worker mis-reported it')
+        elif not mail and age_min > 30:
+            F('HIGH', a['t'], f"{a['company']}: no confirmation email yet ({int(age_min)} min)", '')
         files = [f for f in glob.glob(os.path.join(RESUME_DIR, '*.pdf')) if comp and comp in os.path.basename(f).lower()]
         val = None
         if files:
@@ -122,7 +134,7 @@ def audit_transcript(path, since, core):
             val['file'] = os.path.basename(f)
         a['checks'] = checks
         a['validation'] = val
-        missing = [k for k, v in checks.items() if not v]
+        missing = [k for k, v in checks.items() if not v and k != 'gmail_confirmation']
         if val and not val['ok']:
             F('CRITICAL', a['t'], f"Applied to {a['company']} with a resume that FAILS validation", val['file'] + ': ' + ' | '.join(val['fails'])[:400])
         if not checks['resume_uploaded'] and not checks['jd_read']:
@@ -186,7 +198,14 @@ def main():
             fp = os.path.join(RESUME_DIR, r['file'])
             if not r['ok'] and fp not in seen:
                 seen.add(fp); must_pass.append(dict(company=V.company_of(fp), resume_path=fp, linkedin_url=None, resubmit=False))
-        must_flag = [c['what'] + ': ' + c['detail'][:120] for c in crit if 'FAILS validation' not in c['what']]
+        for r in results:
+            for a in r['applications']:
+                if a.get('gmail') is None and (time.time() - a['t']) / 60 > 90:
+                    fp = os.path.join(RESUME_DIR, a['validation']['file']) if a.get('validation') else None
+                    if fp and fp not in seen:
+                        seen.add(fp); must_pass.append(dict(company=a['company'], resume_path=fp, linkedin_url=a.get('linkedin_url'), resubmit=True,
+                                                            reason='no Gmail confirmation: verify on the ATS; if it was never submitted, apply again via the LinkedIn listing'))
+        must_flag = [c['what'] + ': ' + c['detail'][:120] for c in crit if 'FAILS validation' not in c['what'] and 'no confirmation email' not in c['what']]
         halt = dict(id=halt_id, ts=time.time(), critical=[c['what'] + ': ' + c['detail'][:150] for c in crit[:10]],
                     must_pass=must_pass, must_flag=must_flag,
                     how_to_clear=(f"For each must_pass entry: 1) rebuild the resume individually from resume core.pdf with its JD open until "

@@ -7,6 +7,8 @@ BASE = os.path.expanduser('~/.claude/autoapply')
 HALT = os.path.join(BASE, 'HALT')
 LOG = os.path.join(BASE, 'cron_pass_log.txt')
 VALIDATOR = os.path.join(BASE, 'bin', 'validate_resume.py')
+sys.path.insert(0, os.path.join(BASE, 'bin'))
+import gmail_confirm as G
 
 def main():
     if not os.path.exists(HALT):
@@ -44,6 +46,12 @@ def main():
             if t_up is None: missing.append('no hook-validated upload of the rebuilt resume after that click')
             if t_sub is None: missing.append('no hook-allowed submit after that upload')
             if not self_rep: missing.append("no ledger line {event: submitted, resubmission: true} for this file")
+            if not missing:
+                mail = G.confirmed(ent.get('company') or os.path.basename(p).replace('Resume - ', ''), t0, G.confirmations(force=True))
+                if not mail:
+                    missing.append("no confirmation email in Gmail yet for this resubmission (emails usually arrive within minutes; re-run clear_halt.py in a few minutes; if none arrives after 30 min, the submission did not go through: check the ATS tab's success screen and submit again)")
+                else:
+                    with open(LOG, 'a') as f: f.write(f"GMAIL CONFIRMED {ent.get('company')}: {mail.get('subject')} ({mail.get('date')})\n")
             if missing:
                 unmet.append(f"{ent.get('company') or os.path.basename(p)}: rebuilt resume passes, but resubmission not evidenced: " + '; '.join(missing)
                              + ". Open the LinkedIn listing" + (f" ({ent['linkedin_url']})" if ent.get('linkedin_url') else '')

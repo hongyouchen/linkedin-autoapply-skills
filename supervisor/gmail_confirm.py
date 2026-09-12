@@ -14,7 +14,9 @@ QUERY = 'newer_than:{d}d (application OR applying OR applied OR "security code f
 PROMPT = ('Use the Gmail search tool exactly once with query: {q} and pageSize 50. '
           'Return ONLY a JSON array, no prose, no code fence: '
           '[{{"from":"sender address","subject":"...","date":"ISO 8601","snippet":"first 120 chars"}}]. '
-          'Include every thread returned. If the tool is unavailable return {{"error":"no gmail tool"}}.')
+          'IMPORTANT: threads contain a "messages" list; emit ONE entry PER MESSAGE (every message of every thread), '
+          'each with that message\'s own date, not one entry per thread. '
+          'If the tool is unavailable return {{"error":"no gmail tool"}}.')
 
 def _parse_ts(s):
     try: return datetime.datetime.fromisoformat(s.replace('Z', '+00:00')).timestamp()
@@ -75,6 +77,8 @@ def confirmed(company, since_ts, threads=None):
     for t in threads:
         if re.search(r'security code|verification code|verify your (email|identity)|one-time|passcode|confirm your email', t.get('subject', ''), re.I):
             continue  # a login/verification email is not proof the application went through
+        if not re.search(r'appl(y|ied|ication|ying)|your interest|candidate|received your|next steps', t.get('subject', '') + ' ' + t.get('snippet', ''), re.I):
+            continue  # marketing / account mail from the same company is not a confirmation
         blob = (t.get('from', '') + ' ' + t.get('subject', '') + ' ' + t.get('snippet', '')).lower().replace(' ', '')
         if key in blob and t.get('ts', 0) >= since_ts - 300:
             return t

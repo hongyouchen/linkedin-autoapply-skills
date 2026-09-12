@@ -74,6 +74,8 @@ def audit_transcript(path, since, core):
 
     # pass-level checks
     for e in ev:
+        if e.get('log_text') and re.search(r'PASS PAUSED budget:', e['log_text']):
+            F('MEDIUM', e['t'], 'Worker paused a pass citing token budget (allowed escape; verify it was genuine)', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
         if e['tool'] == 'AskUserQuestion':
             F('HIGH', e['t'], 'Stopped pass to ask a question', e.get('q', ''))
         if e['tool'] in ('Write', 'Edit') and e.get('employers', 0) >= 2 and not e['path'].lower().endswith(('.html', '.htm', '.md')):

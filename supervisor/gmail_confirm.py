@@ -47,7 +47,11 @@ def confirmations(days=3, force=False):
 
 def targeted(companies, days=3):
     """fallback: a search naming the companies directly (cached per company set)."""
-    keys = sorted({re.sub(r'[^A-Za-z0-9 ]', '', (c or '').split('(')[0]).strip().split()[0] for c in companies if c and c.strip()})
+    keys = set()
+    for c in companies:
+        words = re.sub(r'[^A-Za-z0-9 ]', ' ', (c or '').split('(')[0]).split()
+        if words: keys.add(words[0])
+    keys = sorted(keys)
     keys = [k for k in keys if len(k) > 1 and not k.isdigit()]
     if not keys: return []
     tag = 'targeted:' + ','.join(keys)
@@ -71,7 +75,8 @@ def targeted(companies, days=3):
     return threads
 
 def confirmed(company, since_ts, threads=None):
-    key = re.sub(r'[^a-z0-9]', '', (company or '').lower().split()[0]) if company else ''
+    words = re.sub(r'[^a-z0-9 ]', ' ', (company or '').lower()).split()
+    key = words[0] if words else ''
     if not key: return None
     threads = threads if threads is not None else confirmations()
     for t in threads:

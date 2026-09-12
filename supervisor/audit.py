@@ -68,7 +68,7 @@ def audit_transcript(path, since, core):
             for m in re.finditer(r'APPLIED\s+([^\n(/]+?)(?:\s*\(|\s+via|\s+-|\n|$)', e['log_text']):
                 line_end = e['log_text'].find('\n', m.end()); line = e['log_text'][m.start():line_end if line_end > 0 else None]
                 jid = re.search(r'\b(\d{9,11})\b', line)
-                if re.fullmatch(r'[\d\s]+', m.group(1).strip()) or 'Tally' in e['log_text'][max(0, m.start()-40):m.start()]:
+                if not re.search(r'[A-Za-z]', m.group(1)) or re.fullmatch(r'[\d\s]+', m.group(1).strip()) or 'Tally' in e['log_text'][max(0, m.start()-40):m.start()]:
                     continue  # "APPLIED 3 (...)" tally lines are counts, not companies
                 apps.append(dict(t=e['t'], company=m.group(1).strip()[:60], linkedin_url=(f'https://www.linkedin.com/jobs/view/{jid.group(1)}/' if jid else None)))
 
@@ -133,7 +133,11 @@ def audit_transcript(path, since, core):
         }
         # Gmail: every real submission produces a confirmation email (Andy, 2026-09-11)
         age_min = (time.time() - a['t']) / 60
-        mail = G.confirmed(a['company'], a['t'], gmail_threads) or G.confirmed(a['company'], a['t'], G.targeted([a['company']]))
+        try:
+            mail = G.confirmed(a['company'], a['t'], gmail_threads) or G.confirmed(a['company'], a['t'], G.targeted([a['company']]))
+        except Exception as ex:
+            mail = None
+            F('LOW', a['t'], f"{a['company']!r}: Gmail lookup error ({ex}); confirmation not checked this run", '')
         checks['gmail_confirmation'] = bool(mail)
         a['gmail'] = dict(subject=mail.get('subject'), from_=mail.get('from'), date=mail.get('date')) if mail else None
         if not mail and age_min > 90:
@@ -181,7 +185,15 @@ def main():
     else:
         paths = [p for p in glob.glob(os.path.join(PROJ, '*.jsonl')) if os.path.getmtime(p) >= since - 60 and is_worker_transcript(p)]
     core = V.load_core()
-    results = [audit_transcript(p, since, core) for p in paths]
+    results = []
+    for p in paths:
+        try:
+            results.append(audit_transcript(p, since, core))
+        except Exception as ex:
+            import traceback
+            results.append(dict(transcript=os.path.basename(p), events=0, applications=[], pages_visited=[],
+                                findings=[dict(sev='HIGH', t=time.time(), transcript=os.path.basename(p), what='Auditor error on this transcript; checks incomplete this run',
+                                               detail=f'{type(ex).__name__}: {ex} | ' + traceback.format_exc().splitlines()[-3][:150])]))
 
     new_files = [f for f in glob.glob(os.path.join(RESUME_DIR, '*.pdf')) if os.path.getmtime(f) >= since]
     file_results = []

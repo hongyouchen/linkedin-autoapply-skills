@@ -2,6 +2,8 @@
 # Runs the deterministic audit, then notifies Andy when there is something to see. Scheduled by launchd every 5 minutes.
 export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 BASE="$HOME/.claude/autoapply"
+# launchd has no Claude login: read the Gmail cache the guard hook refreshes, never search live
+export AUTOAPPLY_NO_LIVE=1
 cd "$BASE" || exit 1
 # never let two runs overlap (a 5-minute cadence on a slow day)
 if ! mkdir "$BASE/.audit.lock" 2>/dev/null; then

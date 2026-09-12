@@ -48,6 +48,10 @@ LEN_MIN = 0.80        # fraction of core text length
 SPECIFICS_MIN = 0.90  # fraction of core numeric specifics that must appear
 TRACE_MIN = 0.60      # min difflib ratio of a tailored bullet to its closest core bullet
 MIN_CHANGED = 3       # at least this many work bullets must carry a JD-specific insertion
+# Standing rule (Andy, 2026-09-12): the summary is never tailored. Exact text, body font size, one line.
+STANDARD_SUMMARY = "PM with 3+ YOE in AI & Fintech who champions design, ships alongside eng, and leads xfn teams to decisive execution."
+SUMMARY_RULE_SINCE = 1789250100.0  # resumes rendered before this keep their old summaries
+SUMMARY_SIZE_TOL = 0.3
 
 ROLE_KEYS = [  # (key, matcher on header line lowercased)
     ('gusto', lambda h: 'gusto' in h),
@@ -87,6 +91,8 @@ def parse(pdf):
     roles = {}  # key -> list of bullet strings
     current = None
     summary = []
+    summary_lines = []   # (text, font size)
+    bullet_sizes = []
     prev_ended = True
     for l in body:
         rx = round(l['x0'])
@@ -98,9 +104,10 @@ def parse(pdf):
             if l['text'].lower().startswith(('education', 'leadership', 'skills', 'work experience', 'carnegie')):
                 current = None; prev_ended = True; continue
             if current is None and not roles and not low.startswith(('andy', 'email', 'hongyou')) and '|' not in l['text']:
-                summary.append(l['text'])
+                summary.append(l['text']); summary_lines.append((l['text'], l['size']))
             continue
         if abs(rx - bullet_x) <= 3 and current:
+            bullet_sizes.append(round(l['size'], 1))
             if prev_ended:
                 roles[current].append(l['text'])
             else:
@@ -109,8 +116,9 @@ def parse(pdf):
         # core.pdf puts glyph bullets at a third x; ignore
     full = page.get_text()
     bottom = max((b[3] for b in page.get_text('blocks')), default=0) / page.rect.height
-    return dict(pages=len(doc), lines=ls, roles=roles, summary=' '.join(summary), text=full,
-                length=len(full), fill=bottom)
+    body_size = max(set(bullet_sizes), key=bullet_sizes.count) if bullet_sizes else 0
+    return dict(pages=len(doc), lines=ls, roles=roles, summary=' '.join(summary), summary_lines=summary_lines, body_size=body_size,
+                text=full, length=len(full), fill=bottom)
 
 def core_bullets_from_glyphs(pdf):
     """core.pdf has explicit ● glyphs; assign each text line to the nearest glyph above it."""
@@ -201,6 +209,20 @@ def validate(pdf, core=None, check_dupes=True):
     except Exception as e:
         return dict(ok=False, fails=[f'cannot parse PDF: {e}'], warns=[], info={})
     info['pages'] = p['pages']; info['fill'] = round(p['fill'], 3); info['length'] = p['length']
+    # fixed summary: exact sentence, one line, same font size as the body (resumes rendered after the rule took effect)
+    try: mt = os.path.getmtime(pdf)
+    except Exception: mt = time.time()
+    if mt >= SUMMARY_RULE_SINCE:
+        def _ns(x): return re.sub(r'\s+', ' ', x.replace('\u2019', "'").replace('\u2013', '-').replace('\u2014', '-').replace('&amp;', '&')).strip()
+        sl = p.get('summary_lines', [])
+        got = _ns(' '.join(t for t, _ in sl))
+        info['summary'] = got; info['summary_lines'] = len(sl)
+        if got != _ns(STANDARD_SUMMARY):
+            fails.append(f'summary must be exactly "{STANDARD_SUMMARY}" (standing rule: never tailor the summary); found "{got[:140]}"')
+        elif len(sl) != 1:
+            fails.append(f"summary wraps onto {len(sl)} lines; it must fit on one line at body font size (tighten letter-spacing or margins slightly, never shrink the summary font)")
+        if sl and p.get('body_size') and any(abs(sz - p['body_size']) > SUMMARY_SIZE_TOL for _, sz in sl):
+            fails.append(f"summary font size {sl[0][1]:.1f}pt differs from body text {p['body_size']:.1f}pt; it must be the same size")
     if p['pages'] != 1: fails.append(f"page count {p['pages']} != 1")
     if p['fill'] < FILL_MIN: fails.append(f"page fill {p['fill']:.2f} < {FILL_MIN} (core {core['fill']:.2f}); bottom of page is empty")
     if p['length'] < LEN_MIN * core['length']: fails.append(f"text length {p['length']} < {LEN_MIN:.0%} of core ({core['length']})")

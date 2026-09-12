@@ -160,6 +160,21 @@ def sync_mirror():
     except Exception as e:
         log('MIRROR_ERROR', err=str(e))
 
+def maybe_refresh_gmail():
+    """At most every 10 min, and only when there were submissions in the last 6h, refresh the Gmail cache in a
+    detached process. Hooks inherit the worker's logged-in Claude Code context; the launchd auditor does not."""
+    stamp = os.path.join(BASE, '.gmail_refresh')
+    try:
+        if os.path.exists(stamp) and time.time() - os.path.getmtime(stamp) < 600: return
+        if not any(e.get('event') == 'submitted' and time.time() - e.get('ts', 0) < 24 * 3600 for e in ledger_entries()): return
+        open(stamp, 'w').write(str(time.time()))
+        env = dict(os.environ); env.pop('AUTOAPPLY_NO_LIVE', None)
+        subprocess.Popen([sys.executable, os.path.join(BASE, 'bin', 'gmail_confirm.py'), '--refresh'], env=env,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        log('GMAIL_REFRESH_SPAWNED')
+    except Exception as e:
+        log('GMAIL_REFRESH_ERROR', err=str(e))
+
 def main():
     h = json.load(sys.stdin)
     sync_mirror()
@@ -167,6 +182,7 @@ def main():
     inp = h.get('tool_input', {}) or {}
     strings = list(walk(inp))
     worker = is_worker(h)
+    if worker: maybe_refresh_gmail()
 
     # --- HALT flag: remediation mode. Browser opens only once every must_pass resume passes, and then only for
     #     the listings being resubmitted; the flag itself can only be removed by clear_halt.py ---
@@ -203,7 +219,7 @@ def main():
 
     # --- evidence integrity: the worker may not write hook-owned records ---
     blob = json.dumps(inp)
-    if tool in ('Bash', 'Write', 'Edit') and re.search(r'validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|guard_log\.jsonl|\.halt_cache', blob):
+    if tool in ('Bash', 'Write', 'Edit') and re.search(r'validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|guard_log\.jsonl|\.halt_cache|gmail_cache|gmail_refresh', blob):
         deny('these records are written by the supervisor hooks only; the worker may not create or edit them.')
 
     # --- hook-observed remediation step: clicking the LinkedIn "Go to company site" link ---

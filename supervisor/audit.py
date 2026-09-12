@@ -78,6 +78,7 @@ def audit_transcript(path, since, core):
         return w[0] if w else ''
     t_lo = min((e['t'] for e in ev), default=since); t_hi = max((e['t'] for e in ev), default=time.time())
     try:
+        if not ev: raise FileNotFoundError  # a transcript with no activity in the window owns no applications
         for l in open(os.path.join(BASE, 'ledger.jsonl')):
             try: le = json.loads(l)
             except Exception: continue
@@ -185,12 +186,7 @@ def audit_transcript(path, since, core):
         checks['gmail_confirmation'] = bool(mail) if lookup_ok or mail else None
         a['gmail'] = dict(subject=mail.get('subject'), from_=mail.get('from'), date=mail.get('date')) if mail else None
         a['gmail_lookup_ok'] = lookup_ok
-        if not mail and not lookup_ok:
-            F('LOW', a['t'], f"{a['company']}: Gmail lookup unavailable this run; confirmation not checked", '')
-        elif not mail and age_min > 90:
-            F('CRITICAL', a['t'], f"{a['company']}: no confirmation email in Gmail {int(age_min)} min after APPLIED", 'either the application never actually went through, or the worker mis-reported it')
-        elif not mail and age_min > 30:
-            F('HIGH', a['t'], f"{a['company']}: no confirmation email yet ({int(age_min)} min)", '')
+        a['gmail_pending'] = not mail
         rp = a.get('resume_path')
         rp_resolved = V.resolve(rp) if rp else None
         files = [rp_resolved] if rp_resolved and os.path.exists(rp_resolved) else [f for f in glob.glob(os.path.join(RESUME_DIR, '*.pdf')) if comp and comp in os.path.basename(f).lower()]
@@ -271,6 +267,46 @@ def main():
             results.append(dict(transcript='(guard)', events=0, applications=[], pages_visited=[],
                                 findings=[dict(sev='HIGH', t=stops[-1]['ts'], transcript='(guard)', what=f'Worker tried to stop {len(stops)} times in this window (each refused by the Stop hook)', detail='it is looping on stopping instead of applying; check latest.html for what it is stuck on')]))
     except Exception: pass
+    # the same application can surface from two worker transcripts; keep the first
+    _seen = set()
+    for r in results:
+        keep = []
+        for a in r['applications']:
+            k = (re.sub(r'[^a-z0-9]', '', a['company'].lower())[:20], os.path.basename(a.get('resume_path') or '') or a.get('title', '') or a.get('linkedin_url') or '')
+            if k in _seen:
+                r['findings'] = [f for f in r['findings'] if not (abs(f['t'] - a['t']) < 1 and a['company'] in f['what'])]
+                continue
+            _seen.add(k); keep.append(a)
+        r['applications'] = keep
+    # ---- Gmail pending-confirmation tracker: carried across runs, because each run only sees a 5-minute window ----
+    pending = st.get('pending', {})
+    for r in results:
+        for a in r['applications']:
+            if a.get('gmail_pending'):
+                k = f"{a['company']}|{os.path.basename(a.get('resume_path') or '') or int(a['t'])}"
+                pending.setdefault(k, dict(company=a['company'], ts=a['t'], resume_path=a.get('resume_path'), linkedin_url=a.get('linkedin_url')))
+    gm_f, escalated, now = [], [], time.time()
+    threads = G.confirmations() if pending else []
+    for k, pe in list(pending.items()):
+        mail = None
+        try:
+            mail = G.confirmed(pe['company'], pe['ts'], threads or []) or G.confirmed(pe['company'], pe['ts'], G.targeted([pe['company']]) or [])
+        except Exception:
+            pass
+        age = (now - pe['ts']) / 60
+        if mail:
+            pending.pop(k, None); continue
+        if age > 24 * 60:
+            gm_f.append(dict(sev='HIGH', t=pe['ts'], transcript='(gmail)', what=f"{pe['company']}: no confirmation email after 24h and it could not be verified; dropped from tracking", detail=''))
+            pending.pop(k, None); continue
+        if age > 90 and threads is not None and G.cache_fetched() >= pe['ts'] + 1800 and G.covered(pe['company']):
+            gm_f.append(dict(sev='CRITICAL', t=pe['ts'], transcript='(gmail)', what=f"{pe['company']}: no confirmation email in Gmail {int(age)} min after APPLIED", detail='company-specific search found nothing: either the application never went through, or the worker mis-reported it'))
+            escalated.append(pe)
+            if '--no-halt' not in args: pending.pop(k, None)
+        elif age > 30:
+            gm_f.append(dict(sev='LOW', t=pe['ts'], transcript='(gmail)', what=f"{pe['company']}: confirmation email pending ({int(age)} min)", detail=''))
+    if gm_f:
+        results.append(dict(transcript='(gmail)', events=0, applications=[], pages_visited=[], findings=gm_f))
     all_f = [f for r in results for f in r['findings']]
     crit = [f for f in all_f if f['sev'] == 'CRITICAL']
     summary = dict(run_at=time.time(), since=since, transcripts=[r['transcript'] for r in results],
@@ -292,13 +328,11 @@ def main():
             fp = os.path.join(RESUME_DIR, r['file'])
             if not r['ok'] and fp not in seen:
                 seen.add(fp); must_pass.append(dict(company=V.company_of(fp), resume_path=fp, linkedin_url=None, resubmit=False))
-        for r in results:
-            for a in r['applications']:
-                if a.get('gmail') is None and a.get('gmail_lookup_ok') and (time.time() - a['t']) / 60 > 90:
-                    fp = os.path.join(RESUME_DIR, a['validation']['file']) if a.get('validation') else None
-                    if fp and fp not in seen:
-                        seen.add(fp); must_pass.append(dict(company=a['company'], resume_path=fp, linkedin_url=a.get('linkedin_url'), resubmit=True,
-                                                            reason='no Gmail confirmation: verify on the ATS; if it was never submitted, apply again via the LinkedIn listing'))
+        for esc in escalated:
+            fp = V.resolve(esc['resume_path']) if esc.get('resume_path') else None
+            if fp and fp not in seen:
+                seen.add(fp); must_pass.append(dict(company=esc['company'], resume_path=esc['resume_path'], linkedin_url=esc.get('linkedin_url'), resubmit=True,
+                                                    reason='no Gmail confirmation after 90 min (company-specific search): verify on the ATS; if it was never submitted, apply again via the LinkedIn listing'))
         must_flag = [c['what'] + ': ' + c['detail'][:120] for c in crit if 'FAILS validation' not in c['what'] and 'no confirmation email' not in c['what']]
         halt = dict(id=halt_id, ts=time.time(), critical=[c['what'] + ': ' + c['detail'][:150] for c in crit[:10]],
                     must_pass=must_pass, must_flag=must_flag,
@@ -353,7 +387,7 @@ def main():
     with open(os.path.join(REPORTS, 'audit_log.txt'), 'a') as f:
         f.write(f"{fmt(time.time())} apps={summary['applications']} findings={summary['findings']} critical={summary['critical']} "
                 f"resumes={summary['resumes_failing']}/{summary['resumes_written']} failing halted={halted}\n")
-    json.dump(dict(last_run=time.time()), open(STATE, 'w'))
+    json.dump(dict(last_run=time.time(), pending=pending), open(STATE, 'w'), indent=1)
     print(json.dumps(summary, default=str))
     for f in sorted(all_f, key=lambda f: SEV_ORDER.index(f['sev']))[:30]:
         print(f"  [{f['sev']}] {fmt(f['t'])} {f['what']} :: {f['detail'][:140]}")

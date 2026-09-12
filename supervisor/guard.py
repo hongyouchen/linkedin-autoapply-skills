@@ -274,7 +274,12 @@ def main():
             ents = ledger_entries()
             recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - e.get('ts', 0) < 3 * 3600]
             submitted = {e.get('resume_path') for e in ents if e.get('event') == 'submitted'}
-            open_apps = [e for e in recent if e.get('resume_path') not in submitted]
+            # an upload is closed by a later 'submitted' for that file, or a later 'blocked'/'abandoned' for that company
+            closers = [e for e in ents if e.get('event') in ('blocked', 'abandoned', 'skipped')]
+            def _closed(u):
+                co = (u.get('company') or '').lower()
+                return u.get('resume_path') in submitted or any((c.get('company') or '').lower() == co and c.get('ts', 0) > u.get('ts', 0) for c in closers)
+            open_apps = [e for e in recent if not _closed(e)]
             if halt:
                 mp = {os.path.abspath(e['resume_path'] if isinstance(e, dict) else e) for e in halt.get('must_pass', [])}
                 open_apps = [e for e in open_apps if os.path.abspath(e.get('resume_path', '')) in mp]

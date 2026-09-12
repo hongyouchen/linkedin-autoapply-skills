@@ -75,7 +75,11 @@ def audit_transcript(path, since, core):
     # pass-level checks
     for e in ev:
         if e.get('log_text') and re.search(r'PASS PAUSED budget:', e['log_text']):
-            F('MEDIUM', e['t'], 'Worker paused a pass citing token budget (allowed escape; verify it was genuine)', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
+            later = [x for x in ev if x['t'] > e['t'] + 20 and x['t'] < e['t'] + 1800 and x['tool'] not in ('RESULT', 'USER_TEXT')]
+            if later:
+                F('CRITICAL', e['t'], f'FALSE budget pause: worker claimed tokens were exhausted, then made {len(later)} more tool calls within 30 min', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
+            else:
+                F('MEDIUM', e['t'], 'Worker paused a pass citing token budget (only accepted stop reason; verified no activity followed)', e['log_text'][e['log_text'].find('PASS PAUSED'):][:160])
         if e['tool'] == 'AskUserQuestion':
             F('HIGH', e['t'], 'Stopped pass to ask a question', e.get('q', ''))
         if e['tool'] in ('Write', 'Edit') and e.get('employers', 0) >= 2 and not e['path'].lower().endswith(('.html', '.htm', '.md')):
@@ -181,6 +185,25 @@ def main():
         r['mtime'] = os.path.getmtime(f)
         file_results.append(r)
 
+    # worker idle: no tool activity for 20+ minutes without an accepted stop reason in the log
+    try:
+        tail = [l.rstrip() for l in open(os.path.join(BASE, 'cron_pass_log.txt'), errors='ignore') if l.strip()][-50:]
+    except Exception: tail = []
+    accepted_stop = any(re.match(r'PASS (PAUSED budget:|TERMINATED)', l) for l in tail[-3:])
+    worker_paths = [p for p in glob.glob(os.path.join(PROJ, '*.jsonl')) if is_worker_transcript(p)]
+    last_act = max((os.path.getmtime(p) for p in worker_paths), default=0)
+    idle_min = (time.time() - last_act) / 60 if last_act else None
+    if idle_min is not None and idle_min > 20 and not accepted_stop and not os.path.exists(os.path.join(BASE, 'HALT')):
+        results.append(dict(transcript='(all workers)', events=0, applications=[], pages_visited=[],
+                            findings=[dict(sev='HIGH', t=last_act, transcript='(all workers)', what=f'Worker idle for {int(idle_min)} min with no budget pause or termination logged',
+                                           detail='no worker session is running; the Stop hook only holds a live session, so re-prompt the worker (or re-create its cron) to resume')]))
+    try:
+        gl = [json.loads(l) for l in open(os.path.join(BASE, 'guard_log.jsonl')) if l.strip()]
+        stops = [g for g in gl if g.get('kind', '').startswith('STOP_BLOCKED') and g.get('ts', 0) >= since]
+        if len(stops) >= 5:
+            results.append(dict(transcript='(guard)', events=0, applications=[], pages_visited=[],
+                                findings=[dict(sev='HIGH', t=stops[-1]['ts'], transcript='(guard)', what=f'Worker tried to stop {len(stops)} times in this window (each refused by the Stop hook)', detail='it is looping on stopping instead of applying; check latest.html for what it is stuck on')]))
+    except Exception: pass
     all_f = [f for r in results for f in r['findings']]
     crit = [f for f in all_f if f['sev'] == 'CRITICAL']
     summary = dict(run_at=time.time(), since=since, transcripts=[r['transcript'] for r in results],

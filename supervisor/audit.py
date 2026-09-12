@@ -171,10 +171,18 @@ def main():
                    pages=[r['pages_visited'] for r in results])
     halted = False
     if crit and '--no-halt' not in args:
-        with open(os.path.join(BASE, 'HALT'), 'w') as f:
-            f.write(f"Auditor {fmt(time.time())}: {len(crit)} CRITICAL violation(s). "
-                    + ' || '.join(c['what'] + ': ' + c['detail'][:150] for c in crit[:4])
-                    + "\nRemove this file to resume the worker.")
+        halt_id = datetime.datetime.now().strftime('%Y%m%d-%H%M')
+        must_pass = sorted({os.path.join(RESUME_DIR, a['validation']['file']) for r in results for a in r['applications']
+                            if a.get('validation') and not a['validation']['ok']}
+                           | {os.path.join(RESUME_DIR, r['file']) for r in file_results if not r['ok']})
+        must_flag = [c['what'] + ': ' + c['detail'][:120] for c in crit if 'FAILS validation' not in c['what']]
+        halt = dict(id=halt_id, ts=time.time(), critical=[c['what'] + ': ' + c['detail'][:150] for c in crit[:10]],
+                    must_pass=must_pass, must_flag=must_flag,
+                    how_to_clear=(f"1) Rebuild every file in must_pass individually from resume core.pdf with its JD open until "
+                                  f"`python3 ~/.claude/autoapply/bin/validate_resume.py <file>` passes. 2) If must_flag is non-empty, append one line "
+                                  f"'REMEDIATED HALT {halt_id}: <what happened, which listings, what you did>' to ~/.claude/autoapply/cron_pass_log.txt. "
+                                  f"3) Run `python3 ~/.claude/autoapply/bin/clear_halt.py`; it removes HALT only when all conditions pass. Then resume the pass."))
+        json.dump(halt, open(os.path.join(BASE, 'HALT'), 'w'), indent=1)
         halted = True
     summary['halted'] = halted
 

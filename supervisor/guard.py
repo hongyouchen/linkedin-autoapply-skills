@@ -127,12 +127,16 @@ def main():
     strings = list(walk(inp))
     worker = is_worker(h)
 
-    # --- HALT flag: auditor or Andy stopped the worker ---
-    if worker and os.path.exists(HALT) and (tool.startswith('mcp__claude-in-chrome__') or tool.startswith('mcp__computer-use__') or tool in ('Bash',)):
-        try: why = open(HALT).read().strip()
-        except Exception: why = ''
-        if not (tool == 'Bash' and 'cron_pass_log' in json.dumps(inp)):
-            deny(f'worker is HALTED by the supervisor: {why or "see ~/.claude/autoapply/HALT"}. Write "PASS HALTED <reason>" to cron_pass_log.txt and stop. Andy removes the HALT file to resume.')
+    # --- HALT flag: the worker must remediate, then run clear_halt.py; it cannot browse, submit, or delete the flag ---
+    if worker and os.path.exists(HALT):
+        try: hd = json.load(open(HALT)); why = f"HALT {hd.get('id')}: " + ' || '.join(hd.get('critical', [])[:3]) + '. ' + hd.get('how_to_clear', '')
+        except Exception: why = 'see ~/.claude/autoapply/HALT'
+        if tool.startswith('mcp__claude-in-chrome__') or tool.startswith('mcp__computer-use__'):
+            deny('worker is HALTED by the supervisor; no browser/desktop actions until cleared. ' + why)
+        if tool == 'Bash' and re.search(r'\bHALT\b', str(inp.get('command', ''))) and 'clear_halt.py' not in str(inp.get('command', '')):
+            deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
+        if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).rstrip('/').endswith('/HALT'):
+            deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
 
     # --- Resume upload gate (all sessions) ---
     if tool == 'mcp__claude-in-chrome__file_upload':

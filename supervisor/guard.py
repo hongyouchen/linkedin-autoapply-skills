@@ -180,6 +180,15 @@ def main():
     if not worker:
         return
 
+    # --- evidence integrity: the worker may not write hook-owned records ---
+    blob = json.dumps(inp)
+    if tool in ('Bash', 'Write', 'Edit') and re.search(r'validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|guard_log\.jsonl|\.halt_cache', blob):
+        deny('these records are written by the supervisor hooks only; the worker may not create or edit them.')
+
+    # --- hook-observed remediation step: clicking the LinkedIn "Go to company site" link ---
+    if any(re.search(r'go to company site', sv, re.I) for _, sv in strings):
+        log('GO_TO_COMPANY_SITE')
+
     # --- No direct ATS navigation (must come from LinkedIn's Apply button) ---
     for path, s in strings:
         if ATS_RE.search(s):
@@ -227,7 +236,7 @@ def main():
                 if not open_apps: deny('HALT remediation mode: only resubmissions of the must_pass resumes may be submitted, and the rebuilt resume must be uploaded through file_upload first.')
             if not open_apps:
                 deny('no validated resume upload is on record for an open application (ledger shows none in the last 3h that is not already marked submitted). Upload the validated tailored resume through file_upload first. If this is a LinkedIn native modal where the resume cannot be swapped, do not submit; flag the listing as blocked per autoapply_process.md.')
-            log('ALLOW_SUBMIT', open_apps=[e.get('company') for e in open_apps])
+            log('ALLOW_SUBMIT', open_apps=[e.get('company') for e in open_apps], paths=[e.get('resume_path') for e in open_apps])
 
 if __name__ == '__main__':
     try:

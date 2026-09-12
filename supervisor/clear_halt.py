@@ -17,6 +17,8 @@ def main():
     unmet = []
     try: ledger = [json.loads(l) for l in open(os.path.join(BASE, 'ledger.jsonl')) if l.strip()]
     except Exception: ledger = []
+    try: guard = [json.loads(l) for l in open(os.path.join(BASE, 'guard_log.jsonl')) if l.strip()]
+    except Exception: guard = []
     for ent in h.get('must_pass', []):
         if isinstance(ent, str): ent = dict(resume_path=ent, resubmit=False, company='')
         p = ent['resume_path']
@@ -28,13 +30,24 @@ def main():
         if not res['ok']:
             unmet.append(f'{os.path.basename(p)} still fails: ' + ' | '.join(res['fails'])[:300]); continue
         if ent.get('resubmit'):
-            ok = any(e.get('event') == 'submitted' and os.path.abspath(e.get('resume_path', '')) == os.path.abspath(p)
-                     and e.get('ts', 0) > h.get('ts', 0) for e in ledger)
-            if not ok:
-                unmet.append(f"{ent.get('company') or os.path.basename(p)}: rebuilt resume passes, but no resubmission recorded in ledger.jsonl "
-                             f"(need event 'submitted' for {os.path.basename(p)} dated after the HALT). Open the LinkedIn listing"
-                             + (f" ({ent['linkedin_url']})" if ent.get('linkedin_url') else '') +
-                             ", click the job title, click 'Go to company site', upload the rebuilt resume, submit, then record it.")
+            # evidence chain written by the hooks, not by the worker: Go-to-company-site click -> validated upload of THIS
+            # file -> allowed submit of THIS file, all after the HALT; plus the worker's own 'submitted' ledger line.
+            t0 = h.get('ts', 0)
+            g = [x for x in guard if x.get('ts', 0) > t0]
+            ap = os.path.abspath(p)
+            t_site = next((x['ts'] for x in g if x.get('kind') == 'GO_TO_COMPANY_SITE'), None)
+            t_up = next((x['ts'] for x in g if x.get('kind') == 'ALLOW_UPLOAD' and os.path.abspath(x.get('path', '')) == ap and (t_site is None or x['ts'] > t_site)), None)
+            t_sub = next((x['ts'] for x in g if x.get('kind') == 'ALLOW_SUBMIT' and t_up and x['ts'] > t_up and ap in [os.path.abspath(q or '') for q in x.get('paths', [])]), None)
+            self_rep = any(e.get('event') == 'submitted' and os.path.abspath(e.get('resume_path', '')) == ap and e.get('ts', 0) > t0 for e in ledger)
+            missing = []
+            if t_site is None: missing.append("no hook-observed click on LinkedIn's 'Go to company site' link")
+            if t_up is None: missing.append('no hook-validated upload of the rebuilt resume after that click')
+            if t_sub is None: missing.append('no hook-allowed submit after that upload')
+            if not self_rep: missing.append("no ledger line {event: submitted, resubmission: true} for this file")
+            if missing:
+                unmet.append(f"{ent.get('company') or os.path.basename(p)}: rebuilt resume passes, but resubmission not evidenced: " + '; '.join(missing)
+                             + ". Open the LinkedIn listing" + (f" ({ent['linkedin_url']})" if ent.get('linkedin_url') else '')
+                             + ", click the job title, click 'Go to company site', upload the rebuilt resume via file_upload, submit, then record it.")
     if h.get('must_flag'):
         try: log = open(LOG, errors='ignore').read()
         except FileNotFoundError: log = ''

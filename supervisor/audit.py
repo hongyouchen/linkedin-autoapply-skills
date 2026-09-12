@@ -68,6 +68,8 @@ def audit_transcript(path, since, core):
             for m in re.finditer(r'APPLIED\s+([^\n(/]+?)(?:\s*\(|\s+via|\s+-|\n|$)', e['log_text']):
                 line_end = e['log_text'].find('\n', m.end()); line = e['log_text'][m.start():line_end if line_end > 0 else None]
                 jid = re.search(r'\b(\d{9,11})\b', line)
+                if re.fullmatch(r'[\d\s]+', m.group(1).strip()) or 'Tally' in e['log_text'][max(0, m.start()-40):m.start()]:
+                    continue  # "APPLIED 3 (...)" tally lines are counts, not companies
                 apps.append(dict(t=e['t'], company=m.group(1).strip()[:60], linkedin_url=(f'https://www.linkedin.com/jobs/view/{jid.group(1)}/' if jid else None)))
 
     # pass-level checks
@@ -119,7 +121,7 @@ def audit_transcript(path, since, core):
         }
         # Gmail: every real submission produces a confirmation email (Andy, 2026-09-11)
         age_min = (time.time() - a['t']) / 60
-        mail = G.confirmed(a['company'], a['t'], gmail_threads)
+        mail = G.confirmed(a['company'], a['t'], gmail_threads) or G.confirmed(a['company'], a['t'], G.targeted([a['company']]))
         checks['gmail_confirmation'] = bool(mail)
         a['gmail'] = dict(subject=mail.get('subject'), from_=mail.get('from'), date=mail.get('date')) if mail else None
         if not mail and age_min > 90:

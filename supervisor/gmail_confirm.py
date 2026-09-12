@@ -43,6 +43,31 @@ def confirmations(days=3, force=False):
     json.dump(dict(days=days, fetched=time.time(), threads=threads), open(CACHE, 'w'))
     return threads
 
+def targeted(companies, days=3):
+    """fallback: a search naming the companies directly (cached per company set)."""
+    keys = sorted({re.sub(r'[^A-Za-z0-9 ]', '', (c or '').split('(')[0]).strip().split()[0] for c in companies if c and c.strip()})
+    keys = [k for k in keys if len(k) > 1 and not k.isdigit()]
+    if not keys: return []
+    tag = 'targeted:' + ','.join(keys)
+    try: c = json.load(open(CACHE + '.targeted'))
+    except Exception: c = {}
+    ent = c.get(tag)
+    if ent and time.time() - ent['fetched'] < TTL: return ent['threads']
+    q = f'newer_than:{days}d (' + ' OR '.join(f'"{k}"' for k in keys) + ')'
+    cmd = ['claude', '-p', '--model', 'claude-haiku-4-5-20251001', '--tools', TOOL, '--allowedTools', TOOL, '--output-format', 'json', PROMPT.format(q=q)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=150)
+        res = str(json.loads(r.stdout).get('result', ''))
+        m = re.search(r'\[.*\]', res, re.S)
+        threads = json.loads(m.group(0)) if m else []
+        for t in threads: t['ts'] = _parse_ts(t.get('date', ''))
+    except Exception as e:
+        try: open(os.path.join(BASE, 'reports', 'gmail_errors.log'), 'a').write(f"{time.ctime()} targeted {e}\n")
+        except Exception: pass
+        return ent['threads'] if ent else []
+    c[tag] = dict(fetched=time.time(), threads=threads); json.dump(c, open(CACHE + '.targeted', 'w'))
+    return threads
+
 def confirmed(company, since_ts, threads=None):
     key = re.sub(r'[^a-z0-9]', '', (company or '').lower().split()[0]) if company else ''
     if not key: return None
@@ -57,6 +82,6 @@ def confirmed(company, since_ts, threads=None):
 
 if __name__ == '__main__':
     comp = sys.argv[1]; since = float(sys.argv[2]) if len(sys.argv) > 2 else time.time() - 86400
-    t = confirmed(comp, since)
+    t = confirmed(comp, since) or confirmed(comp, since, targeted([comp]))
     print(json.dumps(t) if t else f'NO CONFIRMATION for {comp} since {time.ctime(since)}')
     sys.exit(0 if t else 1)

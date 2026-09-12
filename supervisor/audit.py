@@ -62,15 +62,54 @@ def audit_transcript(path, since, core):
     def F(sev, t, what, detail=''):
         findings.append(dict(sev=sev, t=t, what=what, detail=detail, transcript=os.path.basename(path)))
 
-    # applications = APPLIED lines written to the pass log
+    # applications, from two sources:
+    #  (1) the ledger's structured {"event":"submitted"} records (primary; worker writes one per application)
+    #  (2) APPLIED lines appended to the pass log, in the worker's formats:
+    #      "PASS <id> | APPLIED | Company - Title | url ..."   "APPLIED: Company - Title ..."   "- APPLIED Company ... via"
+    #      Lines that are grep/sed/cut/awk reads of the log, or page/pass summaries, are ignored.
+    APPLIED_RES = [
+        re.compile(r'PASS \S+ \| APPLIED \| (?P<co>[^|\n\'"]+?)\s+[-\u2013\u2014]\s'),
+        re.compile(r'(?:^|[\'"\s])APPLIED:\s+(?P<co>[^|\n\'"(]+?)\s+[-\u2013\u2014]\s'),
+        re.compile(r'(?:^|\n)\s*-\s+APPLIED\s+(?P<co>[A-Z][^|\n\'"(]+?)\s+(?:\(|via\s)'),
+    ]
+    seen_apps = set()
+    def _key(co): 
+        w = re.sub(r'[^a-z0-9 ]', ' ', co.lower()).split()
+        return w[0] if w else ''
+    t_lo = min((e['t'] for e in ev), default=since); t_hi = max((e['t'] for e in ev), default=time.time())
+    try:
+        for l in open(os.path.join(BASE, 'ledger.jsonl')):
+            try: le = json.loads(l)
+            except Exception: continue
+            if le.get('event') != 'submitted' or not le.get('company'): continue
+            if not (max(since, t_lo - 60) <= le.get('ts', 0) <= t_hi + 60): continue
+            k = (_key(le['company']), os.path.basename(le.get('resume_path', '')) or le.get('title', ''))
+            if k in seen_apps: continue
+            seen_apps.add(k)
+            jid = re.search(r'(\d{9,11})', le.get('linkedin_url', '') or '')
+            apps.append(dict(t=le['ts'], company=le['company'][:60], title=le.get('title', ''), resume_path=le.get('resume_path'),
+                             linkedin_url=(f'https://www.linkedin.com/jobs/view/{jid.group(1)}/' if jid else None), source='ledger'))
+    except FileNotFoundError:
+        pass
+    ledger_cos = {_key(a['company']) for a in apps}
     for e in ev:
-        if e.get('log_text'):
-            for m in re.finditer(r'APPLIED\s+([^\n(/]+?)(?:\s*\(|\s+via|\s+-|\n|$)', e['log_text']):
-                line_end = e['log_text'].find('\n', m.end()); line = e['log_text'][m.start():line_end if line_end > 0 else None]
-                jid = re.search(r'\b(\d{9,11})\b', line)
-                if not re.search(r'[A-Za-z]', m.group(1)) or re.fullmatch(r'[\d\s]+', m.group(1).strip()) or 'Tally' in e['log_text'][max(0, m.start()-40):m.start()]:
-                    continue  # "APPLIED 3 (...)" tally lines are counts, not companies
-                apps.append(dict(t=e['t'], company=m.group(1).strip()[:60], linkedin_url=(f'https://www.linkedin.com/jobs/view/{jid.group(1)}/' if jid else None)))
+        lt = e.get('log_text')
+        if not lt or 'cron_pass_log' not in lt: continue
+        for line in lt.split('\n'):
+            if 'APPLIED' not in line or re.search(r'\b(grep|sed|cut|awk)\b|COMPLETE|Tally', line): continue
+            for rx in APPLIED_RES:
+                m = rx.search(line)
+                if not m: continue
+                co = m.group('co').strip()
+                if not re.search(r'[A-Za-z]{2}', co) or _key(co) in ledger_cos: break
+                jid = re.search(r'jobs/view/(\d{9,11})|\b(\d{10})\b', line)
+                jid = (jid.group(1) or jid.group(2)) if jid else None
+                k = (_key(co), jid)
+                if k in seen_apps: break
+                seen_apps.add(k); ledger_cos.add(_key(co))
+                apps.append(dict(t=e['t'], company=co[:60], linkedin_url=(f'https://www.linkedin.com/jobs/view/{jid}/' if jid else None), source='log'))
+                break
+    apps.sort(key=lambda a: a['t'])
 
     # pass-level checks
     for e in ev:
@@ -120,7 +159,7 @@ def audit_transcript(path, since, core):
     for a in apps:
         w = [e for e in ev if prev_t < e['t'] <= a['t'] + 900]
         wb = [e for e in w if e['t'] <= a['t']]
-        comp = a['company'].lower().split()[0] if a['company'] else ''
+        comp = _key(a['company'])
         checks = {
             'core_reread': any(e['tool'] == 'Read' and 'resume core.pdf' in e.get('path', '') and a['t'] - e['t'] < 7200 for e in ev if e['t'] <= a['t']),
             'jd_read': any(e['tool'] in ('get_page_text', 'find', 'read_page') for e in wb) and any(e['tool'] == 'navigate' and 'linkedin.com/jobs' in e.get('url', '') for e in wb),
@@ -131,20 +170,30 @@ def audit_transcript(path, since, core):
             or any(e['tool'] == 'ASSISTANT_TEXT' and re.search(r'finish applying.*yes|clicked yes|applied badge|shows applied', e['text'], re.I) for e in w),
             'success_screen_reported': any(e['tool'] == 'ASSISTANT_TEXT' and re.search(r'application (was )?submitted|submitted successfully|thank you for (applying|your application)|confirmation (page|screen)|/confirmation', e['text'], re.I) for e in w),
         }
-        # Gmail: every real submission produces a confirmation email (Andy, 2026-09-11)
+        # Gmail: every real submission produces a confirmation email (Andy, 2026-09-11). A FAILED lookup is "unknown", never "missing".
         age_min = (time.time() - a['t']) / 60
+        mail, lookup_ok = None, gmail_threads is not None
         try:
-            mail = G.confirmed(a['company'], a['t'], gmail_threads) or G.confirmed(a['company'], a['t'], G.targeted([a['company']]))
+            if lookup_ok: mail = G.confirmed(a['company'], a['t'], gmail_threads)
+            if not mail:
+                tgt = G.targeted([a['company']])
+                if tgt is None: lookup_ok = False
+                else: mail = G.confirmed(a['company'], a['t'], tgt)
         except Exception as ex:
-            mail = None
-            F('LOW', a['t'], f"{a['company']!r}: Gmail lookup error ({ex}); confirmation not checked this run", '')
-        checks['gmail_confirmation'] = bool(mail)
+            lookup_ok = False
+            F('LOW', a['t'], f"{a['company']}: Gmail lookup error ({ex})", '')
+        checks['gmail_confirmation'] = bool(mail) if lookup_ok or mail else None
         a['gmail'] = dict(subject=mail.get('subject'), from_=mail.get('from'), date=mail.get('date')) if mail else None
-        if not mail and age_min > 90:
+        a['gmail_lookup_ok'] = lookup_ok
+        if not mail and not lookup_ok:
+            F('LOW', a['t'], f"{a['company']}: Gmail lookup unavailable this run; confirmation not checked", '')
+        elif not mail and age_min > 90:
             F('CRITICAL', a['t'], f"{a['company']}: no confirmation email in Gmail {int(age_min)} min after APPLIED", 'either the application never actually went through, or the worker mis-reported it')
         elif not mail and age_min > 30:
             F('HIGH', a['t'], f"{a['company']}: no confirmation email yet ({int(age_min)} min)", '')
-        files = [f for f in glob.glob(os.path.join(RESUME_DIR, '*.pdf')) if comp and comp in os.path.basename(f).lower()]
+        rp = a.get('resume_path')
+        rp_resolved = V.resolve(rp) if rp else None
+        files = [rp_resolved] if rp_resolved and os.path.exists(rp_resolved) else [f for f in glob.glob(os.path.join(RESUME_DIR, '*.pdf')) if comp and comp in os.path.basename(f).lower()]
         val = None
         if files:
             f = max(files, key=os.path.getmtime)
@@ -152,7 +201,7 @@ def audit_transcript(path, since, core):
             val['file'] = os.path.basename(f)
         a['checks'] = checks
         a['validation'] = val
-        missing = [k for k, v in checks.items() if not v and k != 'gmail_confirmation']
+        missing = [k for k, v in checks.items() if v is False and k != 'gmail_confirmation']
         if val and not val['ok']:
             F('CRITICAL', a['t'], f"Applied to {a['company']} with a resume that FAILS validation", val['file'] + ': ' + ' | '.join(val['fails'])[:400])
         if not checks['resume_uploaded'] and not checks['jd_read']:
@@ -245,7 +294,7 @@ def main():
                 seen.add(fp); must_pass.append(dict(company=V.company_of(fp), resume_path=fp, linkedin_url=None, resubmit=False))
         for r in results:
             for a in r['applications']:
-                if a.get('gmail') is None and (time.time() - a['t']) / 60 > 90:
+                if a.get('gmail') is None and a.get('gmail_lookup_ok') and (time.time() - a['t']) / 60 > 90:
                     fp = os.path.join(RESUME_DIR, a['validation']['file']) if a.get('validation') else None
                     if fp and fp not in seen:
                         seen.add(fp); must_pass.append(dict(company=a['company'], resume_path=fp, linkedin_url=a.get('linkedin_url'), resubmit=True,

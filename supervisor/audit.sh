@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Runs the deterministic audit, then notifies Andy when there is something to see. Scheduled by launchd every 5 minutes.
-export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 BASE="$HOME/.claude/autoapply"
 cd "$BASE" || exit 1
 # never let two runs overlap (a 5-minute cadence on a slow day)

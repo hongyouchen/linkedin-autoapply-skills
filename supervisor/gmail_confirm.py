@@ -10,6 +10,27 @@ BASE = os.path.expanduser('~/.claude/autoapply')
 CACHE = os.path.join(BASE, 'gmail_cache.json')
 TTL = 240
 TOOL = 'mcp__claude_ai_Gmail__search_threads'
+import shutil
+CLAUDE = shutil.which('claude') or next((c for c in [os.path.expanduser('~/.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude'] if os.path.exists(c)), 'claude')
+
+def _run_search(q):
+    """Returns a list of message dicts, or None if the lookup itself failed (so callers never read failure as 'no email')."""
+    cmd = [CLAUDE, '-p', '--model', 'claude-haiku-4-5-20251001', '--tools', TOOL, '--allowedTools', TOOL, '--output-format', 'json', PROMPT.format(q=q)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=150)
+        o = json.loads(r.stdout)
+        if o.get('is_error'): raise RuntimeError(str(o.get('result'))[:200])
+        res = str(o.get('result', ''))
+        if '"error"' in res and 'gmail' in res.lower(): raise RuntimeError(res[:200])
+        m = re.search(r'\[.*\]', res, re.S)
+        if not m: raise RuntimeError('no JSON array in result: ' + res[:150])
+        threads = json.loads(m.group(0))
+        for t in threads: t['ts'] = _parse_ts(t.get('date', ''))
+        return threads
+    except Exception as e:
+        try: open(os.path.join(BASE, 'reports', 'gmail_errors.log'), 'a').write(f"{time.ctime()} {type(e).__name__}: {e}\n")
+        except Exception: pass
+        return None
 QUERY = 'newer_than:{d}d (application OR applying OR applied OR "security code for your application")'
 PROMPT = ('Use the Gmail search tool exactly once with query: {q} and pageSize 50. '
           'Return ONLY a JSON array, no prose, no code fence: '
@@ -27,50 +48,26 @@ def confirmations(days=3, force=False):
     except Exception: c = {}
     if not force and c.get('days') == days and time.time() - c.get('fetched', 0) < TTL:
         return c.get('threads', [])
-    q = QUERY.format(d=days)
-    cmd = ['claude', '-p', '--model', 'claude-haiku-4-5-20251001', '--tools', TOOL, '--allowedTools', TOOL,
-           '--output-format', 'json', PROMPT.format(q=q)]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=150)
-        o = json.loads(r.stdout)
-        res = str(o.get('result', ''))
-        m = re.search(r'\[.*\]', res, re.S)
-        threads = json.loads(m.group(0)) if m else []
-    except Exception as e:
-        threads = c.get('threads', [])  # keep last good data
-        try: open(os.path.join(BASE, 'reports', 'gmail_errors.log'), 'a').write(f"{time.ctime()} {e}\n")
-        except Exception: pass
-        return threads
-    for t in threads: t['ts'] = _parse_ts(t.get('date', ''))
+    threads = _run_search(QUERY.format(d=days))
+    if threads is None: return None
     json.dump(dict(days=days, fetched=time.time(), threads=threads), open(CACHE, 'w'))
     return threads
 
 def targeted(companies, days=3):
-    """fallback: a search naming the companies directly (cached per company set)."""
+    """fallback: a search naming the companies directly. None if the lookup failed."""
     keys = set()
     for c in companies:
         words = re.sub(r'[^A-Za-z0-9 ]', ' ', (c or '').split('(')[0]).split()
-        if words: keys.add(words[0])
+        if words and not words[0].isdigit() and len(words[0]) > 1: keys.add(words[0])
     keys = sorted(keys)
-    keys = [k for k in keys if len(k) > 1 and not k.isdigit()]
     if not keys: return []
     tag = 'targeted:' + ','.join(keys)
     try: c = json.load(open(CACHE + '.targeted'))
     except Exception: c = {}
     ent = c.get(tag)
     if ent and time.time() - ent['fetched'] < TTL: return ent['threads']
-    q = f'newer_than:{days}d (' + ' OR '.join(f'"{k}"' for k in keys) + ')'
-    cmd = ['claude', '-p', '--model', 'claude-haiku-4-5-20251001', '--tools', TOOL, '--allowedTools', TOOL, '--output-format', 'json', PROMPT.format(q=q)]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=150)
-        res = str(json.loads(r.stdout).get('result', ''))
-        m = re.search(r'\[.*\]', res, re.S)
-        threads = json.loads(m.group(0)) if m else []
-        for t in threads: t['ts'] = _parse_ts(t.get('date', ''))
-    except Exception as e:
-        try: open(os.path.join(BASE, 'reports', 'gmail_errors.log'), 'a').write(f"{time.ctime()} targeted {e}\n")
-        except Exception: pass
-        return ent['threads'] if ent else []
+    threads = _run_search(f'newer_than:{days}d (' + ' OR '.join(f'"{k}"' for k in keys) + ')')
+    if threads is None: return None
     c[tag] = dict(fetched=time.time(), threads=threads); json.dump(c, open(CACHE + '.targeted', 'w'))
     return threads
 
@@ -78,7 +75,7 @@ def confirmed(company, since_ts, threads=None):
     words = re.sub(r'[^a-z0-9 ]', ' ', (company or '').lower()).split()
     key = words[0] if words else ''
     if not key: return None
-    threads = threads if threads is not None else confirmations()
+    threads = threads if threads is not None else (confirmations() or [])
     for t in threads:
         if re.search(r'security code|verification code|verify your (email|identity)|one-time|passcode|confirm your email', t.get('subject', ''), re.I):
             continue  # a login/verification email is not proof the application went through

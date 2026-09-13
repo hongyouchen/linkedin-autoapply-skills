@@ -4,7 +4,7 @@ Blocks (exit 2 + reason on stderr) when a call would violate a standing rule.
 Only applies worker-scoped rules to sessions that look like autoapply worker sessions;
 the resume-upload validator applies everywhere.
 """
-import sys, os, json, re, time, subprocess
+import sys, os, json, re, time, subprocess, datetime
 
 BASE = os.environ.get('AUTOAPPLY_BASE') or os.path.expanduser('~/.claude/autoapply')
 LEDGER = os.path.join(BASE, 'ledger.jsonl')
@@ -65,18 +65,27 @@ def is_worker(h):
         return False
     return False
 
+def _as_ts(v):
+    """Ledger timestamps must be numbers; accept numeric strings and ISO dates, anything else counts as 0."""
+    if isinstance(v, (int, float)): return float(v)
+    try: return float(v)
+    except Exception: pass
+    try: return datetime.datetime.fromisoformat(str(v).replace('Z', '+00:00')).timestamp()
+    except Exception: return 0.0
+
 def ledger_entries():
     out = []
     try:
         for line in open(LEDGER):
             line = line.strip()
-            if line:
-                try: out.append(json.loads(line))
-                except Exception: pass
+            if not line: continue
+            try: e = json.loads(line)
+            except Exception: continue
+            if not isinstance(e, dict): continue
+            e['ts'] = _as_ts(e.get('ts', 0))
+            out.append(e)
     except FileNotFoundError: pass
     return out
-
-HALT_CACHE = os.path.join(BASE, '.halt_cache.json')
 
 def halt_pending_resumes(halt):
     """names of must_pass resumes that still fail (validator results cached by file mtime)."""
@@ -120,46 +129,47 @@ def _resume_key(path):
     parts = [p for p in re.split(r'[^a-z0-9]+', b) if p]
     return parts[0] if parts else b
 
+def _company_key_from_resume(rp):
+    m = re.match(r'Resume - (.+?)(?: \(|\.pdf$)', os.path.basename(rp or ''))
+    return re.sub(r'[^a-z0-9]', '', m.group(1).lower()) if m else ''
+
 def _resume_finished(active, st):
-    """finished = its PDF copied into the resumes folder after the last HTML edit and passing the validator,
-    or a blocked/abandoned/skipped/submitted/validated_upload ledger event for that company, or 20 min without edits."""
-    key = _resume_key(active['path'])
+    """finished = its resume PDF (mapped from the cp into Claude Resumes, or found via the ledger) passes the validator
+    after the last HTML edit; or a closing ledger event or pass-log decision for that company; or 20 min without edits."""
     if time.time() - active.get('ts_last', 0) > 1200:
         return True
-    # the worker's own convention: a pass-log decision line naming this company, written after the resume was started
+    keys = {k for k in (_resume_key(active['path']), _company_key_from_resume(active.get('resume_path'))) if k}
+    def _match(co):
+        co = re.sub(r'[^a-z0-9]', '', (co or '').lower())
+        return bool(co) and any(co.startswith(k) or k.startswith(co) for k in keys)
+    checked = st.setdefault('checked', {})
+    def _passes(rp):
+        if not rp or not os.path.exists(rp) or os.path.getmtime(rp) < active.get('ts_last', 0) - 2: return False
+        mt = os.path.getmtime(rp); hit = checked.get(rp)
+        if not hit or hit[0] != mt:
+            try:
+                r = subprocess.run([sys.executable, VALIDATOR, '--json', rp], capture_output=True, text=True, timeout=120)
+                ok = json.loads(r.stdout).get('ok', False)
+            except Exception:
+                ok = False
+            checked[rp] = [mt, ok]; hit = checked[rp]
+        return bool(hit[1])
+    if _passes(active.get('resume_path')):
+        return True
     try:
         if os.path.getmtime(os.path.join(BASE, 'cron_pass_log.txt')) >= active.get('ts_start', 0):
             with open(os.path.join(BASE, 'cron_pass_log.txt'), errors='ignore') as fh:
                 tail = fh.read()[-60000:].split('\n')[-400:]
             for line in reversed(tail):
-                if not re.search(r'\b(BLOCKED|LOGGED|SKIP|APPLIED|NOT APPLIED|RESUBMITTED)\b', line): continue
-                norm = re.sub(r'[^a-z0-9]', '', line.lower())
-                if key and key in norm:
+                if re.search(r'\b(BLOCKED|LOGGED|SKIP|APPLIED|NOT APPLIED|RESUBMITTED)\b', line) and any(k in re.sub(r'[^a-z0-9]', '', line.lower()) for k in keys):
                     return True
     except Exception:
         pass
-    checked = st.setdefault('checked', {})
     for e in reversed(ledger_entries()):
-        co = re.sub(r'[^a-z0-9]', '', (e.get('company') or '').lower())
-        if not co or not (co.startswith(key) or key.startswith(co)):
-            continue
-        if e.get('ts', 0) < active.get('ts_start', 0) - 6 * 3600:
-            break
-        if e.get('event') in ('blocked', 'abandoned', 'skipped', 'submitted', 'validated_upload'):
-            return True
-        rp = e.get('resume_path')
-        if rp and os.path.exists(rp) and os.path.getmtime(rp) >= active.get('ts_last', 0) - 2:
-            mt = os.path.getmtime(rp)
-            hit = checked.get(rp)
-            if not hit or hit[0] != mt:
-                try:
-                    r = subprocess.run([sys.executable, VALIDATOR, '--json', rp], capture_output=True, text=True, timeout=120)
-                    ok = json.loads(r.stdout).get('ok', False)
-                except Exception:
-                    ok = False
-                checked[rp] = [mt, ok]; hit = checked[rp]
-            if hit[1]:
-                return True
+        if not _match(e.get('company')): continue
+        if e['ts'] < active.get('ts_start', 0) - 6 * 3600: break
+        if e.get('event') in ('blocked', 'abandoned', 'skipped', 'submitted', 'validated_upload'): return True
+        if _passes(e.get('resume_path')): return True
     return False
 
 def check_one_resume_at_a_time(path):
@@ -211,7 +221,7 @@ def check_resume_upload(paths, h, tab_id=None):
         comp = (e.get('company') or '').lower()
         fn = os.path.basename(p).lower()
         if comp and comp.split()[0] not in fn: deny(f'ledger company {comp!r} does not match resume filename {fn!r}')
-        if time.time() - e.get('ts', 0) > 4 * 3600: deny('ledger entry is older than 4 hours; write a fresh entry for this application.')
+        if time.time() - _as_ts(e.get('ts', 0)) > 4 * 3600: deny('ledger entry is older than 4 hours; write a fresh entry for this application.')
         # stamp
         try:
             with open(LEDGER, 'a') as f: f.write(json.dumps(dict(ts=time.time(), event='validated_upload', resume_path=p, company=e.get('company'), session=h.get('session_id'), tab_id=tab_id)) + '\n')
@@ -359,6 +369,14 @@ def main():
     if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).lower().endswith(('.html', '.htm')):
         check_one_resume_at_a_time(str(inp.get('file_path')))
     if tool == 'Bash':
+        # remember which resume PDF the active HTML became, so abbreviated file names (wk_jpmc_...) still match their company
+        for _m2 in re.finditer(r'\bcp\s+"?([^"\s]+\.pdf)"?\s+"([^"]*/Resume - [^"]+\.pdf)"', str(inp.get('command', ''))):
+            try:
+                _st = json.load(open(ACTIVE)); _a = _st.get('active')
+                if _a and os.path.splitext(os.path.basename(_a['path']))[0] == os.path.splitext(os.path.basename(_m2.group(1)))[0]:
+                    _a['resume_path'] = _m2.group(2); json.dump(_st, open(ACTIVE, 'w'))
+            except Exception:
+                pass
         _m = re.search(r'\bcp\s+[^;&|\n]*?\s("?)([^\s;&|"]+\.html?)\1\s*(?:$|[;&|])', str(inp.get('command', '')))
         if _m:
             check_one_resume_at_a_time(os.path.expanduser(_m.group(2)))
@@ -411,13 +429,13 @@ def main():
         submit_tabs = {tab for _, _, tab in _submit_items if tab is not None}
         if submit_like:
             ents = ledger_entries()
-            recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - e.get('ts', 0) < 3 * 3600]
+            recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - _as_ts(e.get('ts', 0)) < 3 * 3600]
             submitted = {e.get('resume_path') for e in ents if e.get('event') == 'submitted'}
             # an upload is closed by a later 'submitted' for that file, or a later 'blocked'/'abandoned' for that company
             closers = [e for e in ents if e.get('event') in ('blocked', 'abandoned', 'skipped')]
             def _closed(u):
                 co = (u.get('company') or '').lower()
-                return u.get('resume_path') in submitted or any((c.get('company') or '').lower() == co and c.get('ts', 0) > u.get('ts', 0) for c in closers)
+                return u.get('resume_path') in submitted or any((c.get('company') or '').lower() == co and _as_ts(c.get('ts', 0)) > _as_ts(u.get('ts', 0)) for c in closers)
             open_apps = [e for e in recent if not _closed(e)]
             # the submit must happen in the same browser tab the validated resume was uploaded in
             if submit_tabs:

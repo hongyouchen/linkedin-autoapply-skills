@@ -195,7 +195,7 @@ def check_resume_upload(paths, h):
             deny(f'{os.path.basename(p)} FAILS resume validation against resume core.pdf: ' + ' | '.join(res['fails'])
                  + '. Rebuild it individually from core.pdf at full depth (see hard_rule_no_resume_shortcuts). Do not upload a different file to get around this.')
         # 2. ledger evidence: JD saved for this company before the resume was built
-        ents = [e for e in ledger_entries() if os.path.abspath(e.get('resume_path', '')) == os.path.abspath(p)]
+        ents = [e for e in ledger_entries() if os.path.abspath(e.get('resume_path', '')) == os.path.abspath(p) and not e.get('event')]  # real application entries, not event records or upload stamps
         if not ents:
             deny(f'no ledger entry for {os.path.basename(p)}. Before uploading, append a JSON line to {LEDGER} with: company, title, linkedin_url (linkedin.com/jobs/view/...), jd_path (saved JD text under {BASE}/jd/), resume_path, apply_path. See autoapply_process.md "Supervision protocol".')
         e = ents[-1]

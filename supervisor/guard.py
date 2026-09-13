@@ -161,14 +161,14 @@ def _resume_finished(active, st):
             with open(os.path.join(BASE, 'cron_pass_log.txt'), errors='ignore') as fh:
                 tail = fh.read()[-60000:].split('\n')[-400:]
             for line in reversed(tail):
-                if re.search(r'\b(BLOCKED|LOGGED|SKIP|APPLIED|NOT APPLIED|RESUBMITTED)\b', line) and any(k in re.sub(r'[^a-z0-9]', '', line.lower()) for k in keys):
+                if re.search(r'\b(BLOCKED|HELD|SKIPPED|LOGGED|SKIP|APPLIED|NOT APPLIED|RESUBMITTED)\b', line) and any(k in re.sub(r'[^a-z0-9]', '', line.lower()) for k in keys):
                     return True
     except Exception:
         pass
     for e in reversed(ledger_entries()):
         if not _match(e.get('company')): continue
         if e['ts'] < active.get('ts_start', 0) - 6 * 3600: break
-        if e.get('event') in ('blocked', 'abandoned', 'skipped', 'submitted', 'validated_upload'): return True
+        if e.get('event') in ('blocked', 'held', 'abandoned', 'skipped', 'submitted', 'validated_upload'): return True
         if _passes(e.get('resume_path')): return True
     return False
 
@@ -182,7 +182,7 @@ def check_one_resume_at_a_time(path, command=''):
         if not fin and command:
             # the same command appends a blocked/abandoned/skipped event for the active resume's company before starting the next one
             _k = {k for k in (_resume_key(a['path']), _company_key_from_resume(a.get('resume_path'))) if k}
-            for _ev in re.finditer(r'\b(blocked|abandoned|skipped)\b', command):
+            for _ev in re.finditer(r'\b(blocked|held|abandoned|skipped)\b', command, re.I):
                 _win = re.sub(r'[^a-z0-9]', '', command[max(0, _ev.start() - 300):_ev.end() + 300].lower())
                 if 'ledgerjsonl' in re.sub(r'[^a-z0-9]', '', command.lower()) and any(k in _win for k in _k):
                     fin = True; break
@@ -454,7 +454,7 @@ def main():
             recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - _as_ts(e.get('ts', 0)) < 3 * 3600]
             submitted = {e.get('resume_path') for e in ents if e.get('event') == 'submitted'}
             # an upload is closed by a later 'submitted' for that file, or a later 'blocked'/'abandoned' for that company
-            closers = [e for e in ents if e.get('event') in ('blocked', 'abandoned', 'skipped')]
+            closers = [e for e in ents if e.get('event') in ('blocked', 'held', 'abandoned', 'skipped')]
             def _closed(u):
                 co = (u.get('company') or '').lower()
                 return u.get('resume_path') in submitted or any((c.get('company') or '').lower() == co and _as_ts(c.get('ts', 0)) > _as_ts(u.get('ts', 0)) for c in closers)

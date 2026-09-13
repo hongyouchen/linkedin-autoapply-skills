@@ -445,6 +445,7 @@ def main():
             if not re.search(r'\bsubmit(?!ted)', t, re.I) or 'linkedin.com' in t: return False
             if k == 'js': return bool(re.search(r'\.click\(|\.submit\(|requestSubmit|dispatchEvent\(', t))
             if k == 'query' and re.search(r'\b(every|all|each|list|inventory|questions?|fields?|inputs?|labels?)\b', t, re.I): return False
+            if k == 'query' and re.search(r'\bnot\s+(?:the\s+)?["\']?submit|\bcancel\b|\bclose\b|\bdismiss\b|\bexpander\b|\bback\b', t, re.I): return False
             return True
         _submit_items = [(k, t, tab) for k, t, tab in _texts if _is_submit(k, t)]
         submit_like = bool(_submit_items)

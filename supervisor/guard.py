@@ -389,7 +389,7 @@ def main():
         _m = re.search(r'\bcp\s+[^;&|\n]*?\s("?)([^\s;&|"]+\.html?)\1\s*(?:$|[;&|])', str(inp.get('command', '')))
         if _m:
             _dest = os.path.expanduser(_m.group(2))
-            _cd = re.search(r'\bcd\s+"?([^\s;&|"]+)"?\s*(?:&&|;)', str(inp.get('command', '))[:_m.start()])
+            _cd = re.search(r'\bcd\s+"?([^\s;&|"]+)"?\s*(?:&&|;)', str(inp.get('command', ''))[:_m.start()])
             if not os.path.isabs(_dest) and _cd:
                 _dest = os.path.join(os.path.expanduser(_cd.group(1)), _dest)
             check_one_resume_at_a_time(_dest)

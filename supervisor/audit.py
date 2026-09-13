@@ -51,6 +51,27 @@ def is_worker_transcript(p):
     return bool(re.search(r'recurring LinkedIn autoapply pass|auto-?apply campaign|autoapply_process\.md|Run the .{0,40}autoapply', first_user_text(p), re.I))
 
 
+def _ts_num(v):
+    if isinstance(v, (int, float)): return float(v)
+    try: return float(v)
+    except Exception: pass
+    try: return datetime.datetime.fromisoformat(str(v).replace('Z', '+00:00')).timestamp()
+    except Exception: return 0.0
+
+def unverified_submits(ledger, since):
+    """'submitted' records in the window whose resume has no validated upload stamp in the 3 hours before.
+    Submits clicked by screen coordinates never pass through the submit gate, so this is the after-the-fact check."""
+    out = []
+    uploads = [(os.path.abspath(e.get('resume_path', '')), _ts_num(e.get('ts'))) for e in ledger if e.get('event') == 'validated_upload']
+    for e in ledger:
+        if e.get('event') != 'submitted': continue
+        t = _ts_num(e.get('ts'))
+        if t < since: continue
+        rp = os.path.abspath(e.get('resume_path', '') or '')
+        if not e.get('resume_path') or not any(p == rp and t - 3 * 3600 <= ut <= t + 60 for p, ut in uploads):
+            out.append(dict(company=e.get('company'), title=e.get('title'), ts=t, resume_path=e.get('resume_path')))
+    return out
+
 def fmt(t):
     return datetime.datetime.fromtimestamp(t).strftime('%m-%d %H:%M')
 
@@ -329,6 +350,13 @@ def main():
             if '--no-halt' not in args: pending.pop(k, None)
         elif age > 30:
             gm_f.append(dict(sev='LOW', t=pe['ts'], transcript='(gmail)', what=f"{pe['company']}: confirmation email pending ({int(age)} min)", detail=''))
+    try:
+        _led = [json.loads(l) for l in open(os.path.join(BASE, 'ledger.jsonl')) if l.strip()]
+    except Exception:
+        _led = []
+    for u in unverified_submits(_led, since):
+        gm_f.append(dict(sev='CRITICAL', t=u['ts'], transcript='(ledger)', what=f"{u['company']}: application marked submitted with no validated resume upload before it",
+                         detail=f"{u.get('title') or ''} | resume on record: {u.get('resume_path') or 'none'} | check on the ATS which resume was actually sent"))
     if gm_f:
         results.append(dict(transcript='(gmail)', events=0, applications=[], pages_visited=[], findings=gm_f))
     all_f = [f for r in results for f in r['findings']]

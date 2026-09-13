@@ -109,9 +109,15 @@ def covered(company):
     return any(isinstance(e, dict) and key in e.get('keys', []) and not e.get('truncated') and time.time() - e.get('fetched', 0) < STALE
                for e in _load(TCACHE).values())
 
-def confirmed(company, since_ts, threads=None):
+STOP = {'senior','sr','staff','principal','lead','manager','product','the','and','of','for','a','an','to','in','at','with','ii','iii','pm','-','/','&'}
+
+def _title_words(title):
+    return [w for w in re.sub(r'[^a-z0-9 ]', ' ', (title or '').lower()).split() if w not in STOP and len(w) > 2]
+
+def confirmed(company, since_ts, threads=None, title=None):
     key = _key(company)
-    if not key: return None
+    tw = _title_words(title)
+    if not key and len(tw) < 2: return None
     threads = threads if threads is not None else (confirmations() or [])
     for t in threads:
         subj = t.get('subject', '')
@@ -120,7 +126,13 @@ def confirmed(company, since_ts, threads=None):
         if not re.search(r'appl(y|ied|ication|ying)|your interest|candidate|received your|next steps', subj + ' ' + t.get('snippet', ''), re.I):
             continue  # marketing / account mail from the same company is not a confirmation
         blob = (t.get('from', '') + ' ' + subj + ' ' + t.get('snippet', '')).lower().replace(' ', '')
-        if key in blob and t.get('ts', 0) >= since_ts - 300:
+        if t.get('ts', 0) < since_ts - 300:
+            continue
+        if key and key in blob:
+            return t
+        # brand aliases (e.g. Shift Paradigm emails as "SH/FT"): accept when the job title's distinctive words all appear
+        # and the email arrived within 2 hours of the submission
+        if len(tw) >= 2 and all(w in blob for w in tw) and t.get('ts', 0) <= since_ts + 7200:
             return t
     return None
 
@@ -135,7 +147,7 @@ def refresh():
     recent = [e for e in led if e.get('event') == 'submitted' and e.get('company') and 900 < now - e.get('ts', 0) < 6 * 3600]
     tc = _load(TCACHE)
     cached_threads = [t for e in tc.values() if isinstance(e, dict) for t in e.get('threads', [])]
-    need = [e for e in recent if not confirmed(e['company'], e['ts'], th or []) and not confirmed(e['company'], e['ts'], cached_threads)]
+    need = [e for e in recent if not confirmed(e['company'], e['ts'], th or [], e.get('title')) and not confirmed(e['company'], e['ts'], cached_threads, e.get('title'))]
     last_searched = {}
     for e in tc.values():
         if isinstance(e, dict):
@@ -148,7 +160,7 @@ def refresh():
         finally: TTL = _ttl
     tc = _load(TCACHE); cached_threads = [t for e in tc.values() if isinstance(e, dict) for t in e.get('threads', [])]
     out = dict(at=time.ctime(), broad=None if th is None else len(th), searched=due, recent=len(recent),
-               unconfirmed=sorted({e['company'] for e in need if not confirmed(e['company'], e['ts'], cached_threads)}))
+               unconfirmed=sorted({e['company'] for e in need if not confirmed(e['company'], e['ts'], cached_threads, e.get('title'))}))
     try: json.dump(out, open(os.path.join(BASE, 'reports', 'gmail_refresh.json'), 'w'))
     except Exception: pass
     return out

@@ -199,7 +199,7 @@ def audit_transcript(path, since, core):
         age_min = (time.time() - a['t']) / 60
         mail, lookup_ok = None, gmail_threads is not None
         try:
-            if lookup_ok: mail = G.confirmed(a['company'], a['t'], gmail_threads)
+            if lookup_ok: mail = G.confirmed(a['company'], a['t'], gmail_threads, a.get('title'))
             if not mail:
                 tgt = G.targeted([a['company']])
                 if tgt is None: lookup_ok = False
@@ -308,13 +308,13 @@ def main():
         for a in r['applications']:
             if a.get('gmail_pending'):
                 k = f"{a['company']}|{os.path.basename(a.get('resume_path') or '') or int(a['t'])}"
-                pending.setdefault(k, dict(company=a['company'], ts=a['t'], resume_path=a.get('resume_path'), linkedin_url=a.get('linkedin_url')))
+                pending.setdefault(k, dict(company=a['company'], title=a.get('title', ''), ts=a['t'], resume_path=a.get('resume_path'), linkedin_url=a.get('linkedin_url')))
     gm_f, escalated, now = [], [], time.time()
     threads = G.confirmations() if pending else []
     for k, pe in list(pending.items()):
         mail = None
         try:
-            mail = G.confirmed(pe['company'], pe['ts'], threads or []) or G.confirmed(pe['company'], pe['ts'], G.targeted([pe['company']]) or [])
+            mail = G.confirmed(pe['company'], pe['ts'], threads or [], pe.get('title')) or G.confirmed(pe['company'], pe['ts'], G.targeted([pe['company']]) or [], pe.get('title'))
         except Exception:
             pass
         age = (now - pe['ts']) / 60

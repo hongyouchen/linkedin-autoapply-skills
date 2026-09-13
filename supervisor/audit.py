@@ -141,6 +141,30 @@ def audit_transcript(path, since, core):
         if e['tool'] == 'ASSISTANT_TEXT' and re.search(r"(won'?t|did ?n'?t|does ?n'?t|not) (render|load)|skeleton", e['text'], re.I):
             F('LOW', e['t'], 'Claimed a listing did not load (verify: these claims were wrong twice)', e['text'][:200])
     pages = sorted({int(m.group(1)) for e in ev if e['tool'] == 'navigate' for m in [re.search(r'[?&]start=(\d+)', e.get('url', ''))] if m})
+    # under-enumerated results pages: LinkedIn renders only cards scrolled into view, so an anchor-based scan can
+    # count 17-19 of the 25 cards on a full page (found by the worker 2026-09-12 in pass 2352). A non-final page logged
+    # with fewer than 25 cards and no re-verification line in the same pass may have unevaluated listings.
+    page_lines = {}
+    for e in ev:
+        lt = e.get('log_text') or ''
+        if 'cron_pass_log' not in lt: continue
+        for line in lt.split('\n'):
+            m = re.search(r'PASS (\d{4}) \| (?:UI )?PAGE (\d+)[^\n]*?COMPLETE[^\n]*?(\d+) cards', line)
+            if m and 'RE-VERIFY' not in line:
+                page_lines.setdefault(m.group(1), {})[int(m.group(2))] = (int(m.group(3)), e['t'])
+            if 'RE-VERIFY' in line or 'occludable' in line:
+                pm = re.search(r'PASS (\d{4})', line)
+                if pm: page_lines.setdefault(pm.group(1), {})['reverified'] = True
+    for pid, pg in page_lines.items():
+        if pg.get('reverified'): continue
+        nums = [k for k in pg if isinstance(k, int)]
+        if not nums: continue
+        last = max(nums)
+        short = sorted(k for k in nums if k < last and pg[k][0] < 25)
+        if short:
+            F('HIGH', pg[short[0]][1], f'Pass {pid}: results pages {short} logged fewer than 25 cards without re-verification (cards may have been hidden until scrolled; listings possibly never evaluated)',
+              ', '.join(f'p{k}={pg[k][0]}' for k in short))
+
 
     # batch authoring: several distinct resume HTML files touched (Write or Edit) inside one 90s window,
     # or a render command that renders more than one file

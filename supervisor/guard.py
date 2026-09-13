@@ -196,6 +196,10 @@ def main():
         if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).rstrip('/').endswith('/HALT'):
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
         if tool.startswith('mcp__claude-in-chrome__') or tool.startswith('mcp__computer-use__'):
+            resubmits = [e for e in halt.get('must_pass', []) if isinstance(e, dict) and e.get('resubmit')]
+            if not resubmits:
+                # nothing needs the browser to remediate: stop everything until the worker writes its account and clears
+                deny('worker is HALTED; all browser/desktop actions are blocked until the HALT is cleared. Stop the current listing now. ' + why)
             pending = halt_pending_resumes(halt)
             if pending:
                 deny('worker is HALTED; browser stays closed until every must_pass resume passes the validator. Still failing: '

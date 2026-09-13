@@ -359,17 +359,21 @@ def main():
                                                     reason='no Gmail confirmation after 90 min (company-specific search): verify on the ATS; if it was never submitted, apply again via the LinkedIn listing'))
         must_flag = [c['what'] + ': ' + c['detail'][:120] for c in crit if 'FAILS validation' not in c['what'] and 'no confirmation email' not in c['what']]
         halt = dict(id=halt_id, ts=time.time(), critical=[c['what'] + ': ' + c['detail'][:150] for c in crit[:10]],
-                    must_pass=must_pass, must_flag=must_flag,
+                    must_pass=must_pass, must_flag=[], notes=must_flag,
                     how_to_clear=(f"For each must_pass entry: 1) rebuild the resume individually from resume core.pdf with its JD open until "
                                   f"`python3 ~/.claude/autoapply/bin/validate_resume.py <resume_path>` passes (browser stays blocked until ALL must_pass resumes pass). "
                                   f"2) If resubmit is true: open the LinkedIn listing (linkedin_url, or find it by company+title; search-results pages stay blocked), "
                                   f"click the job title, click the blue 'Go to company site' link under Application status, write a fresh ledger entry, upload the rebuilt resume, "
                                   f"submit the application again, then append a ledger line {{\"event\":\"submitted\",\"resume_path\":...,\"company\":...,\"resubmission\":true}} "
-                                  f"and a log line 'RESUBMITTED <company>'. 3) If must_flag is non-empty, append one line "
-                                  f"'REMEDIATED HALT {halt_id}: <what happened, which listings, what you did>' to ~/.claude/autoapply/cron_pass_log.txt. "
-                                  f"4) Do not run anything to clear it: on your next browser action, and on every 5-minute audit, the supervisor re-checks every condition and removes HALT itself once they all hold. Then continue the pass with the next listing."))
-        json.dump(halt, open(os.path.join(BASE, 'HALT'), 'w'), indent=1)
-        halted = True
+                                  f"and a log line 'RESUBMITTED <company>'. "
+                                  f""
+                                  f"3) Do not run anything to clear it: on your next browser action, and on every 5-minute audit, the supervisor re-checks every condition and removes HALT itself once they all hold. Then continue the pass with the next listing."))
+        # HALT only when there is something to remediate (a resume to rebuild or an application to resubmit). Critical findings with
+        # nothing to remediate were already blocked by the guard at the moment of the attempt; halting on them only strands the
+        # worker, whose permission check will not let it write its own account line. They stay in the report and notification.
+        if must_pass:
+            json.dump(halt, open(os.path.join(BASE, 'HALT'), 'w'), indent=1)
+            halted = True
     summary['halted'] = halted
 
     stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')

@@ -59,16 +59,25 @@ def _ts_num(v):
     except Exception: return 0.0
 
 def unverified_submits(ledger, since):
-    """'submitted' records in the window whose resume has no validated upload stamp in the 3 hours before.
-    Submits clicked by screen coordinates never pass through the submit gate, so this is the after-the-fact check."""
+    """'submitted' records in the window with no validated upload stamp in the 3 hours before, matched by resume file when
+    the record names one, otherwise by company. Submits clicked by screen coordinates never pass through the submit gate,
+    so this is the after-the-fact check."""
+    def _co(x): return re.sub(r'[^a-z0-9]', '', (x or '').lower())
+    uploads = [(os.path.abspath(e.get('resume_path', '') or ''), _co(e.get('company')), _ts_num(e.get('ts')))
+               for e in ledger if e.get('event') == 'validated_upload']
     out = []
-    uploads = [(os.path.abspath(e.get('resume_path', '')), _ts_num(e.get('ts'))) for e in ledger if e.get('event') == 'validated_upload']
     for e in ledger:
         if e.get('event') != 'submitted': continue
         t = _ts_num(e.get('ts'))
         if t < since: continue
-        rp = os.path.abspath(e.get('resume_path', '') or '')
-        if not e.get('resume_path') or not any(p == rp and t - 3 * 3600 <= ut <= t + 60 for p, ut in uploads):
+        rp = os.path.abspath(e['resume_path']) if e.get('resume_path') else None
+        co = _co(e.get('company'))
+        def _hit(u):
+            p, uco, ut = u
+            if not (t - 3 * 3600 <= ut <= t + 60): return False
+            if rp: return p == rp
+            return bool(co) and bool(uco) and (uco.startswith(co) or co.startswith(uco))
+        if not any(_hit(u) for u in uploads):
             out.append(dict(company=e.get('company'), title=e.get('title'), ts=t, resume_path=e.get('resume_path')))
     return out
 

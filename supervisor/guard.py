@@ -6,7 +6,7 @@ the resume-upload validator applies everywhere.
 """
 import sys, os, json, re, time, subprocess
 
-BASE = os.path.expanduser('~/.claude/autoapply')
+BASE = os.environ.get('AUTOAPPLY_BASE') or os.path.expanduser('~/.claude/autoapply')
 LEDGER = os.path.join(BASE, 'ledger.jsonl')
 HALT = os.path.join(BASE, 'HALT')
 LOG = os.path.join(BASE, 'guard_log.jsonl')
@@ -208,9 +208,11 @@ def main():
         except Exception: halt = dict(id='legacy', must_pass=[], critical=[open(HALT).read()[:200]], how_to_clear='')
         why = f"HALT {halt.get('id')}: " + ' || '.join(halt.get('critical', [])[:3]) + '. ' + halt.get('how_to_clear', '')
         _c = str(inp.get('command', ''))
-        _touches_halt_file = re.search(r'autoapply/HALT\b', _c) or re.search(r'\bHALT(?=["\'\s]*(?:$|[;&|)]))', _c)
-        _mutates = re.search(r'\b(rm|mv|cp|unlink|truncate|remove|rename|touch)\b|>|\.write\(|open\(', _c)
-        if tool == 'Bash' and _touches_halt_file and _mutates and 'clear_halt.py' not in _c:
+        _halt_write = (re.search(r'\b(rm|mv|cp|unlink|truncate|touch|chmod|ln)\b[^;&|\n]*(?<![A-Za-z_])HALT\b(?!\s+\d{8}-\d{4})', _c)
+                       or re.search(r'>{1,2}\s*["\']?[^\s;&|"\']*(?<![A-Za-z_])HALT\b', _c)
+                       or re.search(r'(os\.remove|os\.unlink|os\.rename|os\.replace|shutil\.\w+)\([^)]*HALT', _c)
+                       or re.search(r'open\([^)]*HALT[^)]*["\'][wax]', _c))
+        if tool == 'Bash' and _halt_write and 'clear_halt.py' not in _c:
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
         if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).rstrip('/').endswith('/HALT'):
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)

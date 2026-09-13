@@ -1,23 +1,52 @@
 #!/usr/bin/env python3
-"""Stop hook: a worker session may not end its turn. The only accepted reasons to stop are a genuine
-token-budget exhaustion (logged as 'PASS PAUSED budget: ...') or Andy terminating the pass
-('PASS TERMINATED ...'). After a pass completes, the next pass starts immediately (cadence rule 3)."""
+"""Stop hook: a worker session may not end its turn, except for a genuine token-budget pause ('PASS PAUSED budget: ...')
+or Andy terminating the pass ('PASS TERMINATED ...'). After a pass completes, the next pass starts immediately.
+Loop protection: refusals are rate-limited so a worker that genuinely cannot progress (for example a HALT it is not
+permitted to clear) is not bounced forever, burning tokens. Under a HALT: one refusal per 10 minutes. Otherwise: three
+refusals per 10 minutes. When released, a FLAG line records that the worker looked stuck."""
 import sys, os, json, re, time
-BASE = os.path.expanduser('~/.claude/autoapply')
+BASE = os.environ.get('AUTOAPPLY_BASE') or os.path.expanduser('~/.claude/autoapply')
 LOGF = os.path.join(BASE, 'cron_pass_log.txt')
+STATE = os.path.join(BASE, 'stop_guard_state.json')
 sys.path.insert(0, os.path.join(BASE, 'bin'))
 from guard import is_worker, log
 
-REMINDER = ('AUTOAPPLY GUARD: do not stop. Andy\'s standing rule: keep applying; the only acceptable reason to stop is running out of tokens. ')
+REMINDER = "AUTOAPPLY GUARD: do not stop. Andy's standing rule: keep applying; the only acceptable reason to stop is running out of tokens. "
+WINDOW = 600
+
+def _state():
+    try: st = json.load(open(STATE))
+    except Exception: st = {}
+    now = time.time()
+    st['blocks'] = [t for t in st.get('blocks', []) if now - t < WINDOW]
+    return st
+
+def _release(st, why):
+    now = time.time()
+    if now - st.get('last_flag', 0) > 1800:
+        try:
+            with open(LOGF, 'a') as f:
+                f.write(f"FLAG: supervisor released the stop hook at {time.strftime('%Y-%m-%d %H:%M')} after repeated refusals; the worker appears stuck ({why}). Needs Andy.\n")
+        except Exception: pass
+        st['last_flag'] = now
+    json.dump(st, open(STATE, 'w'))
+    log('STOP_ALLOWED_RATELIMIT', why=why)
+
+def _block(st, msg):
+    st['blocks'].append(time.time()); json.dump(st, open(STATE, 'w'))
+    log('STOP_BLOCKED', msg=msg[:160])
+    sys.stderr.write(msg + '\n'); sys.exit(2)
 
 def main():
     h = json.load(sys.stdin)
     if not is_worker(h): return
+    st = _state()
     if os.path.exists(os.path.join(BASE, 'HALT')):
-        try: how = json.load(open(os.path.join(BASE, 'HALT'))).get('how_to_clear', '')
-        except Exception: how = ''
-        log('STOP_BLOCKED_HALT')
-        sys.stderr.write(REMINDER + 'The worker is HALTED: remediate now. ' + how + '\n'); sys.exit(2)
+        try: hd = json.load(open(os.path.join(BASE, 'HALT'))); how = hd.get('how_to_clear', ''); hid = hd.get('id')
+        except Exception: how, hid = '', '?'
+        if len(st['blocks']) >= 1:
+            return _release(st, f'HALT {hid} still present')
+        return _block(st, REMINDER + f'The worker is HALTED ({hid}): write the REMEDIATED line and do any listed resubmissions; the supervisor clears HALT automatically once conditions hold. ' + how)
     try: lines = [l.rstrip() for l in open(LOGF, errors='ignore') if l.strip()]
     except FileNotFoundError: lines = []
     tail = lines[-400:]
@@ -25,23 +54,21 @@ def main():
     i_start, i_complete = last(r'PASS START\b'), last(r'PASS COMPLETE\b')
     i_cleared, i_paused, i_term = last(r'HALT \S+ CLEARED\b'), last(r'PASS PAUSED budget:'), last(r'PASS TERMINATED\b')
     i_progress = max(i_start, i_cleared, i_complete)
-    # accepted exits: a budget pause or Andy's termination that is newer than any progress marker
     if i_paused > i_progress:
         log('STOP_ALLOWED_BUDGET', line=tail[i_paused][:200]); return
     if i_term > i_progress:
         log('STOP_ALLOWED_TERMINATED', line=tail[i_term][:200]); return
+    if len(st['blocks']) >= 3:
+        return _release(st, 'three stop refusals in 10 minutes without progress')
     last_line = tail[-1][:200] if tail else '(empty log)'
     if i_complete >= i_progress and i_complete >= 0:
-        msg = (REMINDER + f'The last pass is COMPLETE ({tail[i_complete][:120]}). Start the next full pass NOW: write "PASS START <id>" and navigate to page 1 of the search '
-               '(cadence rule 3: passes run back-to-back, gated only by finishing the previous one).')
+        msg = REMINDER + f'The last pass is COMPLETE ({tail[i_complete][:120]}). Start the next full pass NOW: write "PASS START <id>" and navigate to page 1.'
     elif i_cleared > i_start:
-        msg = (REMINDER + 'A HALT was just cleared; the pass continues from the listing after the last APPLIED/SKIPPED/LOGGED line, not from page 1. Last log line: ' + last_line)
+        msg = REMINDER + 'A HALT was just cleared; continue from the listing after the last APPLIED/SKIPPED/LOGGED line, not from page 1. Last log line: ' + last_line
     else:
-        msg = (REMINDER + 'The current pass is not complete (last log line: ' + last_line + '). Continue with the next unevaluated listing / next results page; '
-               'write "PASS COMPLETE <id> applied=N logged=N skipped=N blocked=N" only after every results page is done, then start the next pass.')
-    msg += ' If tokens are GENUINELY exhausted, write "PASS PAUSED budget: <exact page and listing to resume from>" to cron_pass_log.txt; a false budget pause is detected by the auditor and is treated as a critical violation. Never use AskUserQuestion.'
-    log('STOP_BLOCKED', last=last_line)
-    sys.stderr.write(msg + '\n'); sys.exit(2)
+        msg = REMINDER + 'The current pass is not complete (last log line: ' + last_line + '). Continue with the next unevaluated listing / next results page.'
+    msg += ' If tokens are GENUINELY exhausted, write "PASS PAUSED budget: <exact page and listing>" to cron_pass_log.txt. Never use AskUserQuestion.'
+    _block(st, msg)
 
 if __name__ == '__main__':
     try: main()

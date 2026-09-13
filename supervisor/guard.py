@@ -172,13 +172,20 @@ def _resume_finished(active, st):
         if _passes(e.get('resume_path')): return True
     return False
 
-def check_one_resume_at_a_time(path):
+def check_one_resume_at_a_time(path, command=''):
     try: st = json.load(open(ACTIVE))
     except Exception: st = {}
     now = time.time(); a = st.get('active')
     same = a and os.path.basename(a['path']) == os.path.basename(path)  # identity is the file name; relative and absolute spellings are the same resume
     if a and not same:
         fin = _resume_finished(a, st)
+        if not fin and command:
+            # the same command appends a blocked/abandoned/skipped event for the active resume's company before starting the next one
+            _k = {k for k in (_resume_key(a['path']), _company_key_from_resume(a.get('resume_path'))) if k}
+            for _ev in re.finditer(r'\b(blocked|abandoned|skipped)\b', command):
+                _win = re.sub(r'[^a-z0-9]', '', command[max(0, _ev.start() - 300):_ev.end() + 300].lower())
+                if 'ledgerjsonl' in re.sub(r'[^a-z0-9]', '', command.lower()) and any(k in _win for k in _k):
+                    fin = True; break
         json.dump(st, open(ACTIVE, 'w'))
         if not fin:
             deny(f"one resume at a time (hard_rule_no_resume_shortcuts rule 4): {os.path.basename(a['path'])} is still in progress. "
@@ -392,7 +399,7 @@ def main():
             _cd = re.search(r'\bcd\s+"?([^\s;&|"]+)"?\s*(?:&&|;)', str(inp.get('command', ''))[:_m.start()])
             if not os.path.isabs(_dest) and _cd:
                 _dest = os.path.join(os.path.expanduser(_cd.group(1)), _dest)
-            check_one_resume_at_a_time(_dest)
+            check_one_resume_at_a_time(_dest, str(inp.get('command', '')))
 
     # --- No resume generator scripts / batch content files ---
     if tool in ('Write', 'Edit'):

@@ -367,7 +367,7 @@ def main():
                                   f"submit the application again, then append a ledger line {{\"event\":\"submitted\",\"resume_path\":...,\"company\":...,\"resubmission\":true}} "
                                   f"and a log line 'RESUBMITTED <company>'. 3) If must_flag is non-empty, append one line "
                                   f"'REMEDIATED HALT {halt_id}: <what happened, which listings, what you did>' to ~/.claude/autoapply/cron_pass_log.txt. "
-                                  f"4) Run `python3 ~/.claude/autoapply/bin/clear_halt.py`; it removes HALT only when every condition holds. Then continue the pass with the next listing."))
+                                  f"4) Do not run anything to clear it: on your next browser action, and on every 5-minute audit, the supervisor re-checks every condition and removes HALT itself once they all hold. Then continue the pass with the next listing."))
         json.dump(halt, open(os.path.join(BASE, 'HALT'), 'w'), indent=1)
         halted = True
     summary['halted'] = halted

@@ -3,7 +3,7 @@
 Exit 0 = cleared, 1 = conditions still unmet (printed), 3 = no HALT present.
 """
 import sys, os, json, re, time, subprocess
-BASE = os.path.expanduser('~/.claude/autoapply')
+BASE = os.environ.get('AUTOAPPLY_BASE') or os.path.expanduser('~/.claude/autoapply')
 HALT = os.path.join(BASE, 'HALT')
 LOG = os.path.join(BASE, 'cron_pass_log.txt')
 VALIDATOR = os.path.join(BASE, 'bin', 'validate_resume.py')

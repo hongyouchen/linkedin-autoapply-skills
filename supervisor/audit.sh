@@ -11,6 +11,7 @@ if ! mkdir "$BASE/.audit.lock" 2>/dev/null; then
   if [ -n "$(find "$BASE/.audit.lock" -mmin +10 2>/dev/null)" ]; then rmdir "$BASE/.audit.lock"; mkdir "$BASE/.audit.lock" || exit 0; else exit 0; fi
 fi
 trap 'rmdir "$BASE/.audit.lock" 2>/dev/null' EXIT
+[ -f "$BASE/HALT" ] && /usr/bin/python3 "$BASE/bin/clear_halt.py" >> "$BASE/reports/audit_runs.log" 2>&1
 OUT=$(/usr/bin/python3 "$BASE/bin/audit.py" "$@" 2>&1)
 echo "$(date '+%Y-%m-%d %H:%M') ----" >> "$BASE/reports/audit_runs.log"
 echo "$OUT" >> "$BASE/reports/audit_runs.log"

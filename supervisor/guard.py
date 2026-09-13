@@ -126,6 +126,18 @@ def _resume_finished(active, st):
     key = _resume_key(active['path'])
     if time.time() - active.get('ts_last', 0) > 1200:
         return True
+    # the worker's own convention: a pass-log decision line naming this company, written after the resume was started
+    try:
+        if os.path.getmtime(os.path.join(BASE, 'cron_pass_log.txt')) >= active.get('ts_start', 0):
+            with open(os.path.join(BASE, 'cron_pass_log.txt'), errors='ignore') as fh:
+                tail = fh.read()[-60000:].split('\n')[-400:]
+            for line in reversed(tail):
+                if not re.search(r'\b(BLOCKED|LOGGED|SKIP|APPLIED|NOT APPLIED|RESUBMITTED)\b', line): continue
+                norm = re.sub(r'[^a-z0-9]', '', line.lower())
+                if key and key in norm:
+                    return True
+    except Exception:
+        pass
     checked = st.setdefault('checked', {})
     for e in reversed(ledger_entries()):
         co = re.sub(r'[^a-z0-9]', '', (e.get('company') or '').lower())

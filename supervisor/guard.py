@@ -181,7 +181,7 @@ def check_one_resume_at_a_time(path):
         st['active'] = dict(path=path, ts_start=now, ts_last=now)
     json.dump(st, open(ACTIVE, 'w'))
 
-def check_resume_upload(paths, h):
+def check_resume_upload(paths, h, tab_id=None):
     for p in paths:
         if not p.lower().endswith('.pdf'): continue
         if os.path.abspath(os.path.dirname(p)) != os.path.abspath(RESUME_DIR) and 'resume' not in os.path.basename(p).lower():
@@ -214,7 +214,7 @@ def check_resume_upload(paths, h):
         if time.time() - e.get('ts', 0) > 4 * 3600: deny('ledger entry is older than 4 hours; write a fresh entry for this application.')
         # stamp
         try:
-            with open(LEDGER, 'a') as f: f.write(json.dumps(dict(ts=time.time(), event='validated_upload', resume_path=p, company=e.get('company'), session=h.get('session_id'))) + '\n')
+            with open(LEDGER, 'a') as f: f.write(json.dumps(dict(ts=time.time(), event='validated_upload', resume_path=p, company=e.get('company'), session=h.get('session_id'), tab_id=tab_id)) + '\n')
         except Exception: pass
         log('ALLOW_UPLOAD', path=p, company=e.get('company'))
 
@@ -306,11 +306,11 @@ def main():
 
     # --- Resume upload gate (all sessions) ---
     if tool == 'mcp__claude-in-chrome__file_upload':
-        check_resume_upload(inp.get('paths', []) or [], h)
+        check_resume_upload(inp.get('paths', []) or [], h, inp.get('tabId'))
     if tool == 'mcp__claude-in-chrome__browser_batch':
         for a in inp.get('actions', []) or []:
             if a.get('name') in ('file_upload', 'mcp__claude-in-chrome__file_upload'):
-                check_resume_upload((a.get('input') or {}).get('paths', []) or [], h)
+                check_resume_upload((a.get('input') or {}).get('paths', []) or [], h, (a.get('input') or {}).get('tabId'))
 
     if not worker:
         return
@@ -394,16 +394,21 @@ def main():
         _texts = []
         def _collect(name, ai):
             name = str(name).replace('mcp__claude-in-chrome__', '')
-            if name == 'find': _texts.append(('query', str(ai.get('query', ''))))
-            elif name == 'computer' and ai.get('action') == 'type': _texts.append(('type', str(ai.get('text', ''))))
-            elif name == 'javascript_tool': _texts.append(('js', str(ai.get('text', ''))))
+            if name == 'find': _texts.append(('query', str(ai.get('query', '')), ai.get('tabId')))
+            elif name == 'computer' and ai.get('action') == 'type': _texts.append(('type', str(ai.get('text', '')), ai.get('tabId')))
+            elif name == 'javascript_tool': _texts.append(('js', str(ai.get('text', '')), ai.get('tabId')))
         if tool.endswith('browser_batch'):
             for _ac in (inp.get('actions') or []): _collect(_ac.get('name', ''), _ac.get('input') or {})
         else:
             _collect(tool, inp)
-        submit_like = any(re.search(r'\bsubmit(?!ted)', t, re.I) and 'linkedin.com' not in t and
-                          (k != 'js' or re.search(r'\.click\(|\.submit\(|requestSubmit|dispatchEvent\(', t))
-                          for k, t in _texts)
+        def _is_submit(k, t):
+            if not re.search(r'\bsubmit(?!ted)', t, re.I) or 'linkedin.com' in t: return False
+            if k == 'js': return bool(re.search(r'\.click\(|\.submit\(|requestSubmit|dispatchEvent\(', t))
+            if k == 'query' and re.search(r'\b(every|all|each|list|inventory|questions?|fields?|inputs?|labels?)\b', t, re.I): return False
+            return True
+        _submit_items = [(k, t, tab) for k, t, tab in _texts if _is_submit(k, t)]
+        submit_like = bool(_submit_items)
+        submit_tabs = {tab for _, _, tab in _submit_items if tab is not None}
         if submit_like:
             ents = ledger_entries()
             recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - e.get('ts', 0) < 3 * 3600]
@@ -414,6 +419,13 @@ def main():
                 co = (u.get('company') or '').lower()
                 return u.get('resume_path') in submitted or any((c.get('company') or '').lower() == co and c.get('ts', 0) > u.get('ts', 0) for c in closers)
             open_apps = [e for e in recent if not _closed(e)]
+            # the submit must happen in the same browser tab the validated resume was uploaded in
+            if submit_tabs:
+                _same_tab = [e for e in open_apps if e.get('tab_id') is None or e.get('tab_id') in submit_tabs]
+                if open_apps and not _same_tab:
+                    deny(f"submit in tab {sorted(submit_tabs)} but the open validated upload(s) were made in tab(s) {sorted({e.get('tab_id') for e in open_apps})}. "
+                         "Upload this application's own tailored resume in THIS tab with file_upload before submitting it.")
+                open_apps = _same_tab
             if halt:
                 mp = {os.path.abspath(e['resume_path'] if isinstance(e, dict) else e) for e in halt.get('must_pass', [])}
                 open_apps = [e for e in open_apps if os.path.abspath(e.get('resume_path', '')) in mp]

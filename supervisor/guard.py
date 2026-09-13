@@ -176,7 +176,7 @@ def check_one_resume_at_a_time(path):
     try: st = json.load(open(ACTIVE))
     except Exception: st = {}
     now = time.time(); a = st.get('active')
-    same = a and os.path.abspath(a['path']) == os.path.abspath(path)
+    same = a and os.path.basename(a['path']) == os.path.basename(path)  # identity is the file name; relative and absolute spellings are the same resume
     if a and not same:
         fin = _resume_finished(a, st)
         json.dump(st, open(ACTIVE, 'w'))
@@ -187,6 +187,7 @@ def check_one_resume_at_a_time(path):
                  f"{os.path.basename(path)}.")
     if same:
         a['ts_last'] = now
+        if os.path.isabs(path): a['path'] = path
     else:
         st['active'] = dict(path=path, ts_start=now, ts_last=now)
     json.dump(st, open(ACTIVE, 'w'))
@@ -387,7 +388,11 @@ def main():
                 pass
         _m = re.search(r'\bcp\s+[^;&|\n]*?\s("?)([^\s;&|"]+\.html?)\1\s*(?:$|[;&|])', str(inp.get('command', '')))
         if _m:
-            check_one_resume_at_a_time(os.path.expanduser(_m.group(2)))
+            _dest = os.path.expanduser(_m.group(2))
+            _cd = re.search(r'\bcd\s+"?([^\s;&|"]+)"?\s*(?:&&|;)', str(inp.get('command', '))[:_m.start()])
+            if not os.path.isabs(_dest) and _cd:
+                _dest = os.path.join(os.path.expanduser(_cd.group(1)), _dest)
+            check_one_resume_at_a_time(_dest)
 
     # --- No resume generator scripts / batch content files ---
     if tool in ('Write', 'Edit'):

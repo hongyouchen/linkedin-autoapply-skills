@@ -191,7 +191,10 @@ def main():
         try: halt = json.load(open(HALT))
         except Exception: halt = dict(id='legacy', must_pass=[], critical=[open(HALT).read()[:200]], how_to_clear='')
         why = f"HALT {halt.get('id')}: " + ' || '.join(halt.get('critical', [])[:3]) + '. ' + halt.get('how_to_clear', '')
-        if tool == 'Bash' and re.search(r'\bHALT\b', str(inp.get('command', ''))) and 'clear_halt.py' not in str(inp.get('command', '')):
+        _c = str(inp.get('command', ''))
+        _touches_halt_file = re.search(r'autoapply/HALT\b', _c) or re.search(r'\bHALT(?=["\'\s]*(?:$|[;&|)]))', _c)
+        _mutates = re.search(r'\b(rm|mv|cp|unlink|truncate|remove|rename|touch)\b|>|\.write\(|open\(', _c)
+        if tool == 'Bash' and _touches_halt_file and _mutates and 'clear_halt.py' not in _c:
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)
         if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).rstrip('/').endswith('/HALT'):
             deny('the HALT file may only be removed by clear_halt.py after the listed conditions are met. ' + why)

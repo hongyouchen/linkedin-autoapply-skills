@@ -263,7 +263,9 @@ def main():
             deny('this shell command writes or runs a script carrying resume content for multiple employers; generators are forbidden. Render only: headless Chrome from a single hand-authored HTML file.')
         if re.search(r'python3?\s+\S*gen\w*\.py', cmd): deny('running a resume generator script is forbidden.')
         # one resume at a time: a render loop or a multi-file render is batch authoring
-        if 'print-to-pdf' in cmd and (re.search(r'\bfor\b.*\b(do|in)\b', cmd) or cmd.count('print-to-pdf') > 1 or len(re.findall(r'\S+\.html?\b', cmd)) > 1):
+        n_outputs = len(re.findall(r'--print-to-pdf=', cmd))
+        n_inputs = len(set(re.findall(r'[^\s"\'=]+\.html?\b', cmd)))
+        if n_outputs and (re.search(r'\bfor\b.*\b(do|in)\b', cmd) or n_outputs > 1 or n_inputs > 1):
             deny('this command renders more than one resume. Resumes are authored and rendered ONE AT A TIME, each with its JD open and visually checked before the next is started (hard_rule_no_resume_shortcuts rule 4). Render a single HTML file per command.')
         if re.search(r'\bcp\b[^|;&]*\.html?\b[^|;&]*\.html?\b', cmd) and re.search(r'\bfor\b', cmd):
             deny('copying a base resume HTML to multiple files is template authoring; start each resume from resume core.pdf content individually.')

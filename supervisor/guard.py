@@ -345,7 +345,8 @@ def main():
     if tool == 'Bash':
         _c = str(inp.get('command', ''))
         if _writes_to(_FILES, _c) or (re.search(_STAMPS, _c) and _writes_to(r'ledger\.jsonl', _c)):
-            deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed).')
+            deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed). '
+                 'After a successful file_upload the guard already writes the validated_upload stamp itself; to log your own note, use a different event name such as "upload_done".')
     if tool in ('Write', 'Edit'):
         _fp = str(inp.get('file_path', ''))
         if re.search(_FILES + r'$', _fp) or (_fp.endswith('ledger.jsonl') and (tool == 'Write' or re.search(_STAMPS, json.dumps(inp)))):

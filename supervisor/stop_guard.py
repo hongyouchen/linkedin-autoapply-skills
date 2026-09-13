@@ -51,8 +51,8 @@ def main():
     except FileNotFoundError: lines = []
     tail = lines[-400:]
     def last(pat): return max((i for i, l in enumerate(tail) if re.match(pat, l)), default=-1)
-    i_start, i_complete = last(r'PASS START\b'), last(r'PASS COMPLETE\b')
-    i_cleared, i_paused, i_term = last(r'HALT \S+ CLEARED\b'), last(r'PASS PAUSED budget:'), last(r'PASS TERMINATED\b')
+    i_start, i_complete = last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS START\b'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS COMPLETE\b')
+    i_cleared, i_paused, i_term = last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?HALT \S+ CLEARED\b'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS PAUSED budget:'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS TERMINATED\b')
     i_progress = max(i_start, i_cleared, i_complete)
     if i_paused > i_progress:
         log('STOP_ALLOWED_BUDGET', line=tail[i_paused][:200]); return

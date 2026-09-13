@@ -112,6 +112,63 @@ def try_auto_clear(halt):
         log('HALT_AUTO_CLEAR_ERROR', err=str(e))
     return False
 
+ACTIVE = os.path.join(BASE, 'active_resume.json')
+
+def _resume_key(path):
+    b = os.path.basename(path).lower()
+    b = re.sub(r'^(wk_|redo_|resume[ _-]*-?[ _]*)', '', b)
+    parts = [p for p in re.split(r'[^a-z0-9]+', b) if p]
+    return parts[0] if parts else b
+
+def _resume_finished(active, st):
+    """finished = its PDF copied into the resumes folder after the last HTML edit and passing the validator,
+    or a blocked/abandoned/skipped/submitted/validated_upload ledger event for that company, or 20 min without edits."""
+    key = _resume_key(active['path'])
+    if time.time() - active.get('ts_last', 0) > 1200:
+        return True
+    checked = st.setdefault('checked', {})
+    for e in reversed(ledger_entries()):
+        co = re.sub(r'[^a-z0-9]', '', (e.get('company') or '').lower())
+        if not co or not (co.startswith(key) or key.startswith(co)):
+            continue
+        if e.get('ts', 0) < active.get('ts_start', 0) - 6 * 3600:
+            break
+        if e.get('event') in ('blocked', 'abandoned', 'skipped', 'submitted', 'validated_upload'):
+            return True
+        rp = e.get('resume_path')
+        if rp and os.path.exists(rp) and os.path.getmtime(rp) >= active.get('ts_last', 0) - 2:
+            mt = os.path.getmtime(rp)
+            hit = checked.get(rp)
+            if not hit or hit[0] != mt:
+                try:
+                    r = subprocess.run([sys.executable, VALIDATOR, '--json', rp], capture_output=True, text=True, timeout=120)
+                    ok = json.loads(r.stdout).get('ok', False)
+                except Exception:
+                    ok = False
+                checked[rp] = [mt, ok]; hit = checked[rp]
+            if hit[1]:
+                return True
+    return False
+
+def check_one_resume_at_a_time(path):
+    try: st = json.load(open(ACTIVE))
+    except Exception: st = {}
+    now = time.time(); a = st.get('active')
+    same = a and os.path.abspath(a['path']) == os.path.abspath(path)
+    if a and not same:
+        fin = _resume_finished(a, st)
+        json.dump(st, open(ACTIVE, 'w'))
+        if not fin:
+            deny(f"one resume at a time (hard_rule_no_resume_shortcuts rule 4): {os.path.basename(a['path'])} is still in progress. "
+                 f"Finish it first: render it, look at the PDF, copy it into Claude Resumes and make sure validate_resume.py passes. "
+                 f"If that application cannot go ahead, record it in ledger.jsonl as an event blocked (with its company) and then start "
+                 f"{os.path.basename(path)}.")
+    if same:
+        a['ts_last'] = now
+    else:
+        st['active'] = dict(path=path, ts_start=now, ts_last=now)
+    json.dump(st, open(ACTIVE, 'w'))
+
 def check_resume_upload(paths, h):
     for p in paths:
         if not p.lower().endswith('.pdf'): continue
@@ -284,6 +341,14 @@ def main():
              'Read the search results and every listing IN THE BROWSER, page by page and job by job: navigate to the listing, wait ~5s, get_page_text, '
              'reload up to 3 times if still loading (autoapply_process.md). Save that page text as the JD file.')
 
+    # --- one resume at a time: starting or editing a second resume HTML while another is unfinished ---
+    if tool in ('Write', 'Edit') and str(inp.get('file_path', '')).lower().endswith(('.html', '.htm')):
+        check_one_resume_at_a_time(str(inp.get('file_path')))
+    if tool == 'Bash':
+        _m = re.search(r'\bcp\s+[^;&|\n]*?\s("?)([^\s;&|"]+\.html?)\1\s*(?:$|[;&|])', str(inp.get('command', '')))
+        if _m:
+            check_one_resume_at_a_time(os.path.expanduser(_m.group(2)))
+
     # --- No resume generator scripts / batch content files ---
     if tool in ('Write', 'Edit'):
         fp = str(inp.get('file_path', ''))
@@ -312,7 +377,19 @@ def main():
 
     # --- Submit gate: a validated upload must exist for the current application ---
     if tool in ('mcp__claude-in-chrome__find', 'mcp__claude-in-chrome__browser_batch', 'mcp__claude-in-chrome__javascript_tool', 'mcp__claude-in-chrome__computer'):
-        submit_like = any(re.search(r'\bsubmit(?!ted)', s, re.I) and 'linkedin.com' not in s for p, s in strings if p.endswith('/query') or p.endswith('/text'))
+        _texts = []
+        def _collect(name, ai):
+            name = str(name).replace('mcp__claude-in-chrome__', '')
+            if name == 'find': _texts.append(('query', str(ai.get('query', ''))))
+            elif name == 'computer' and ai.get('action') == 'type': _texts.append(('type', str(ai.get('text', ''))))
+            elif name == 'javascript_tool': _texts.append(('js', str(ai.get('text', ''))))
+        if tool.endswith('browser_batch'):
+            for _ac in (inp.get('actions') or []): _collect(_ac.get('name', ''), _ac.get('input') or {})
+        else:
+            _collect(tool, inp)
+        submit_like = any(re.search(r'\bsubmit(?!ted)', t, re.I) and 'linkedin.com' not in t and
+                          (k != 'js' or re.search(r'\.click\(|\.submit\(|requestSubmit|dispatchEvent\(', t))
+                          for k, t in _texts)
         if submit_like:
             ents = ledger_entries()
             recent = [e for e in ents if e.get('event') == 'validated_upload' and time.time() - e.get('ts', 0) < 3 * 3600]

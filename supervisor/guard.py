@@ -361,7 +361,7 @@ def main():
             if tool in ('mcp__claude-in-chrome__navigate', 'mcp__claude-in-chrome__browser_batch', 'mcp__claude-in-chrome__javascript_tool', 'Bash', 'mcp__claude-in-chrome__tabs_create_mcp'):
                 if tool == 'mcp__claude-in-chrome__browser_batch' and not re.search(r'/actions\[\d+\]/input/url$', path) and 'javascript' not in path:
                     continue
-                if tool == 'Bash' and not re.search(r'\bopen\b|curl|wget', s): continue
+                if tool == 'Bash' and not re.search(r'(?:^|[;&|(]\s*|\s)(?:open(?:\s+-a\s+(?:"[^"]+"|\S+))?|curl|wget|xdg-open)\s+[^;&|\n]*' + ATS_RE.pattern.split('*', 1)[1] if False else r'(?:^|[;&|(]\s*|\s)(?:open(?:\s+-a\s+(?:"[^"]+"|\S+))?|curl|wget|xdg-open)\s+[^;&|\n]*https?://[^\s"\']*(ashbyhq\.com|greenhouse\.io|rippling\.com|lever\.co|myworkdayjobs\.com|workable\.com|smartrecruiters\.com|jobvite\.com|bamboohr\.com|icims\.com|wellfound\.com|avature\.net|successfactors\.com|applytojob\.com|breezy\.hr|dover\.com)', s, re.I): continue
                 deny(f'direct navigation to an ATS URL ({ATS_RE.search(s).group(0)[:80]}) is not allowed. Reach the application form only by clicking the Apply button on the LinkedIn listing (job_apply_via_linkedin). To reload an ATS tab, press the browser reload key (cmd+r) via the computer tool instead.')
 
     # --- Listings and JDs are read in the browser, job by job (Andy, 2026-09-11: "block it, go through the browser job by job") ---

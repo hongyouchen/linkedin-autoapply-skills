@@ -306,7 +306,7 @@ def main():
     try:
         tail = [l.rstrip() for l in open(os.path.join(BASE, 'cron_pass_log.txt'), errors='ignore') if l.strip()][-50:]
     except Exception: tail = []
-    accepted_stop = any(re.match(r'PASS (PAUSED budget:|TERMINATED)', l) for l in tail[-3:])
+    accepted_stop = any(re.match(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS (PAUSED budget:|TERMINATED)', l) for l in tail[-3:])
     worker_paths = [p for p in glob.glob(os.path.join(PROJ, '*.jsonl')) if is_worker_transcript(p)]
     last_act = max((os.path.getmtime(p) for p in worker_paths), default=0)
     idle_min = (time.time() - last_act) / 60 if last_act else None

@@ -325,15 +325,23 @@ def main():
     if not worker:
         return
 
-    # --- evidence integrity: the worker may not WRITE hook-owned records (reading them is fine) ---
-    PROTECTED = re.compile(r'validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|guard_log\.jsonl|\.halt_cache|gmail_cache|gmail_refresh\.json')
-    WRITE_OP = re.compile(r'>>|(?<![0-9<&>])>(?![&>])|\btee\b|sed\s+-i|\brm\b|\bmv\b|\bcp\b|\btruncate\b|\.write\(|\.dump\(|open\([^)]*["\'][wax]\+?["\']|write_text|shutil\.')
+    # --- evidence integrity: the worker may not WRITE hook-owned records (reading them, or writing elsewhere, is fine) ---
+    _FILES = r'(guard_log\.jsonl|\.halt_cache\.json|\.halt_clear_try|gmail_cache\.json(?:\.targeted)?|gmail_refresh\.json|active_resume\.json|stop_guard_state\.json)'
+    _STAMPS = r'(validated_upload|ALLOW_SUBMIT|ALLOW_UPLOAD|GO_TO_COMPANY_SITE|HALT_AUTO_CLEARED)'
+    def _writes_to(target, c):
+        return bool(re.search(r'>{1,2}\s*["\']?[^\s;&|"\']*' + target, c)
+                    or re.search(r'\b(rm|mv|cp|tee|truncate|touch|unlink)\b[^;&|\n]*' + target, c)
+                    or re.search(r'\bsed\s+-i\b[^;&|\n]*' + target, c)
+                    or re.search(r'open\([^)]*' + target + r'[^)]*["\'][wax]\+?["\']', c)
+                    or re.search(r'(os\.remove|os\.unlink|os\.rename|os\.replace|shutil\.\w+|write_text|Path)\([^)]*' + target, c))
     if tool == 'Bash':
-        cmd = str(inp.get('command', ''))
-        if PROTECTED.search(cmd) and WRITE_OP.search(cmd):
+        _c = str(inp.get('command', ''))
+        if _writes_to(_FILES, _c) or (re.search(_STAMPS, _c) and _writes_to(r'ledger\.jsonl', _c)):
             deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed).')
-    if tool in ('Write', 'Edit') and PROTECTED.search(json.dumps(inp)):
-        deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed).')
+    if tool in ('Write', 'Edit'):
+        _fp = str(inp.get('file_path', ''))
+        if re.search(_FILES + r'$', _fp) or (_fp.endswith('ledger.jsonl') and (tool == 'Write' or re.search(_STAMPS, json.dumps(inp)))):
+            deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed). Append ledger entries with a shell command instead of rewriting the file.')
 
     # --- hook-observed remediation step: clicking the LinkedIn "Go to company site" link ---
     if any(re.search(r'go to company site', sv, re.I) for _, sv in strings):

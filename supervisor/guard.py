@@ -83,6 +83,8 @@ def ledger_entries():
             except Exception: continue
             if not isinstance(e, dict): continue
             e['ts'] = _as_ts(e.get('ts', 0))
+            for _k in ('resume_path', 'jd_path'):
+                if isinstance(e.get(_k), str) and e[_k].startswith('~'): e[_k] = os.path.expanduser(e[_k])
             out.append(e)
     except FileNotFoundError: pass
     return out

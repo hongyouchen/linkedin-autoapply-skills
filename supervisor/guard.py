@@ -11,7 +11,7 @@ LEDGER = os.path.join(BASE, 'ledger.jsonl')
 HALT = os.path.join(BASE, 'HALT')
 LOG = os.path.join(BASE, 'guard_log.jsonl')
 VALIDATOR = os.path.join(BASE, 'bin', 'validate_resume.py')
-RESUME_DIR = os.path.expanduser('~/Downloads/Claude Resumes')
+RESUME_DIR = os.environ.get('AUTOAPPLY_RESUME_DIR') or os.path.expanduser('~/Downloads/Claude Resumes')
 ATS_RE = re.compile(r'https?://[^\s"\']*(ashbyhq\.com|greenhouse\.io|rippling\.com|lever\.co|myworkdayjobs\.com|workable\.com|smartrecruiters\.com|jobvite\.com|bamboohr\.com|icims\.com|wellfound\.com|avature\.net|successfactors\.com|applytojob\.com|breezy\.hr|dover\.com)', re.I)
 EMPLOYERS = ['gusto', 'wingman', 'olive capital', 'castleton', 'scottie ventures', 'goldman sachs']
 
@@ -159,6 +159,18 @@ def _resume_finished(active, st):
         return bool(hit[1])
     if _passes(active.get('resume_path')):
         return True
+    # the PDF may have been copied with shell variables the guard could not parse: look for this company's PDF in
+    # Claude Resumes written after the last HTML edit that passes the validator
+    try:
+        for _f in os.listdir(RESUME_DIR):
+            if not _f.lower().endswith('.pdf'): continue
+            _fp = os.path.join(RESUME_DIR, _f)
+            if os.path.getmtime(_fp) < active.get('ts_last', 0) - 2: continue
+            _co = _company_key_from_resume(_f)
+            if _co and any(_co.startswith(k) or k.startswith(_co) for k in keys) and _passes(_fp):
+                return True
+    except Exception:
+        pass
     try:
         if os.path.getmtime(os.path.join(BASE, 'cron_pass_log.txt')) >= active.get('ts_start', 0):
             with open(os.path.join(BASE, 'cron_pass_log.txt'), errors='ignore') as fh:

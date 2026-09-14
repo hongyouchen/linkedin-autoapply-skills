@@ -382,7 +382,7 @@ def main():
     _OFFICE = re.compile(r"((commit|acknowledg|willing|able to work|requires?|in-person|onsite|on-site|in-office|in office|office|hybrid|commute)[^\n]{0,70}(\d\s*(\+|-\s*\d)?\s*(x|days?)\s*(/|per|a|each)?\s*(week|wk)|\b(two|three|four)\s+days|days?\s*(per|a|/)\s*week|hybrid'?\s*(yes/no)?|mon/|tue/|office\s+commute|not acknowledged))", re.I)
     _FIVE = re.compile(r"(\b5\s*[-+]?\s*days?|\bfive[\s-]+days?|\b5x|every day|fully on-?site|on-?site full[- ]time|relocat)", re.I)
     _HOLDWORD = re.compile(r'(\bHELD\b|\bSKIPPED\b|"event"\s*:\s*"(held|skipped)")')
-    _EXEMPT = re.compile(r'(USER INSTRUCTION|REOPENED|standing answer|CORRECTION)', re.I)
+    _EXEMPT = re.compile(r'(USER INSTRUCTION|REOPENED|standing answer|CORRECTION|travel|relocat|essay|cover letter|legal[\w ]{0,20}name|home address|street address|address\*|consent|attestation|acknowledg\w* (the )?(AI|privacy|terms)|privacy|terms|arbitration|background check|clearance|export|experience claim|own-experience|own-history|years in|certif|OTP|verification code|account creation|GPA|relatives|opinion)', re.I)
     def _office_hold_lines(text):
         out = []
         for ln in str(text).splitlines():

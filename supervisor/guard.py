@@ -372,6 +372,33 @@ def main():
         if re.search(_FILES + r'$', _fp) or (_fp.endswith('ledger.jsonl') and (tool == 'Write' or re.search(_STAMPS, json.dumps(inp)))):
             deny('these records are written by the supervisor hooks only; the worker may not create or edit them (reading them is allowed). Append ledger entries with a shell command instead of rewriting the file.')
 
+    # --- no holds/skips on office attendance Andy already accepted (standing answer: in-office up to 4 days/week, given in the worker chat 2026-09-14) ---
+    _OFFICE = re.compile(r"((commit|acknowledg|willing|able to work|requires?|in-person|onsite|on-site|in-office|in office|office|hybrid|commute)[^\n]{0,70}(\d\s*(\+|-\s*\d)?\s*(x|days?)\s*(/|per|a|each)?\s*(week|wk)|\b(two|three|four)\s+days|days?\s*(per|a|/)\s*week|hybrid'?\s*(yes/no)?|mon/|tue/|office\s+commute|not acknowledged))", re.I)
+    _FIVE = re.compile(r"(\b5\s*[-+]?\s*days?|\bfive[\s-]+days?|\b5x|every day|fully on-?site|on-?site full[- ]time|relocat)", re.I)
+    _HOLDWORD = re.compile(r'(\bHELD\b|\bSKIPPED\b|"event"\s*:\s*"(held|skipped)")')
+    _EXEMPT = re.compile(r'(USER INSTRUCTION|REOPENED|standing answer|CORRECTION)', re.I)
+    def _office_hold_lines(text):
+        out = []
+        for ln in str(text).splitlines():
+            if _HOLDWORD.search(ln) and not _EXEMPT.search(ln) and not _FIVE.search(ln):
+                m = _OFFICE.search(ln)
+                if m and re.search(r'(office|onsite|on-site|in-person|hybrid|commute)', m.group(0), re.I) and re.search(r'(commit|acknowledg|willing|able to|requires?|yes/no|not acknowledged)', ln, re.I):
+                    out.append(ln.strip()[:200])
+        return out
+    _office_text = None
+    if tool == 'Bash' and _writes_to(r'(cron_pass_log\.txt|ledger\.jsonl)', str(inp.get('command', ''))):
+        _office_text = str(inp.get('command', ''))
+    elif tool in ('Write', 'Edit') and str(inp.get('file_path', '')).endswith(('cron_pass_log.txt', 'ledger.jsonl')):
+        _office_text = str(inp.get('content', '')) + '\n' + str(inp.get('new_string', ''))
+    if _office_text:
+        _bad = _office_hold_lines(_office_text)
+        if _bad:
+            deny('this hold/skip cites an office-attendance requirement of 4 days a week or less. Andy already answered that in your chat on 2026-09-14 '
+                 '("i am open to 4 days in the office, go ahead and apply"): answer Yes to in-office/hybrid questions up to 4 days/week and keep applying. '
+                 'Andy (2026-09-14): never assume anything he did not say. Hold or skip only for his stated reasons: 7+ YOE, Gusto, staffing/undisclosed employer, already applied, '
+                 'or a form item that needs his own answer (essay, legal name, home address, consent/attestation, unsupported experience). '
+                 'If one of those also applies, log only that reason. Offending line: ' + _bad[0])
+
     # --- hook-observed remediation step: clicking the LinkedIn "Go to company site" link ---
     if any(re.search(r'go to company site', sv, re.I) for _, sv in strings):
         log('GO_TO_COMPANY_SITE')

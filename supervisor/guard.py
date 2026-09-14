@@ -319,6 +319,27 @@ def maybe_refresh_gmail():
     except Exception as e:
         log('GMAIL_REFRESH_ERROR', err=str(e))
 
+_EMBED_RE = re.compile(r'^https?://(?:job-boards|boards)\.greenhouse\.io/embed/job_app\?[^\s"\']+$', re.I)
+
+def _embed_ok(url):
+    """Andy 2026-09-14: an employer's embedded Greenhouse form may be opened directly, but only for a job the worker reached
+    through LinkedIn Apply: a fresh (4h) open ledger entry for the same company with its linkedin.com/jobs URL."""
+    import urllib.parse
+    url = (url or '').strip()
+    if not _EMBED_RE.match(url): return None
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    board = re.sub(r'[^a-z0-9]', '', (q.get('for') or [''])[0].lower())
+    if not board or not (q.get('token') or [''])[0]: return None
+    now = time.time()
+    for e in reversed(ledger_entries()):
+        if now - e.get('ts', 0) > 4 * 3600: continue
+        if e.get('event') in ('blocked', 'skipped', 'held', 'abandoned', 'submitted'): continue
+        if 'linkedin.com/jobs' not in str(e.get('linkedin_url', '')): continue
+        co = re.sub(r'[^a-z0-9]', '', str(e.get('company', '')).lower())
+        if co and (co.startswith(board) or board.startswith(co)):
+            return e.get('company')
+    return None
+
 def main():
     h = json.load(sys.stdin)
     sync_mirror()
@@ -429,6 +450,12 @@ def main():
                 if tool == 'mcp__claude-in-chrome__browser_batch' and not re.search(r'/actions\[\d+\]/input/url$', path) and 'javascript' not in path:
                     continue
                 if tool == 'Bash' and not re.search(r'(?:^|[;&|(]\s*|\s)(?:open(?:\s+-a\s+(?:"[^"]+"|\S+))?|curl|wget|xdg-open)\s+[^;&|\n]*' + ATS_RE.pattern.split('*', 1)[1] if False else r'(?:^|[;&|(]\s*|\s)(?:open(?:\s+-a\s+(?:"[^"]+"|\S+))?|curl|wget|xdg-open)\s+[^;&|\n]*https?://[^\s"\']*(ashbyhq\.com|greenhouse\.io|rippling\.com|lever\.co|myworkdayjobs\.com|workable\.com|smartrecruiters\.com|jobvite\.com|bamboohr\.com|icims\.com|wellfound\.com|avature\.net|successfactors\.com|applytojob\.com|breezy\.hr|dover\.com)', s, re.I): continue
+                if tool in ('mcp__claude-in-chrome__navigate', 'mcp__claude-in-chrome__browser_batch') and path.endswith('url') and _EMBED_RE.match(s.strip()):
+                    _co = _embed_ok(s)
+                    if _co:
+                        log('EMBED_OPEN', url=s.strip()[:200], company=_co); continue
+                    deny('an embedded Greenhouse form may be opened directly only for a job reached through LinkedIn Apply: first write a ledger entry for this company '
+                         '(company, title, linkedin_url, jd_path, resume_path, apply_path) with its linkedin.com/jobs URL, then open the embed URL (for=<board>&token=<id>) in the tab.')
                 deny(f'direct navigation to an ATS URL ({ATS_RE.search(s).group(0)[:80]}) is not allowed. Reach the application form only by clicking the Apply button on the LinkedIn listing (job_apply_via_linkedin). To reload an ATS tab, press the browser reload key (cmd+r) via the computer tool instead.')
 
     # --- Listings and JDs are read in the browser, job by job (Andy, 2026-09-11: "block it, go through the browser job by job") ---

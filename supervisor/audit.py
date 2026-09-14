@@ -20,6 +20,19 @@ RESUME_DIR = V.RESUME_DIR  # real folder when readable, else the guard-maintaine
 REPORTS = os.path.join(BASE, 'reports')
 STATE = os.path.join(BASE, 'audit_state.json')
 ATS_RE = re.compile(r'(ashbyhq\.com|greenhouse\.io|rippling\.com|lever\.co|myworkdayjobs\.com|workable\.com|smartrecruiters\.com)', re.I)
+
+def _embed_allowed(url):
+    """the guard approved this exact embedded Greenhouse form URL (EMBED_OPEN in guard_log.jsonl)"""
+    url = (url or '').strip()
+    if not re.match(r'^https?://(?:job-boards|boards)\.greenhouse\.io/embed/job_app\?', url, re.I): return False
+    try:
+        base = os.environ.get('AUTOAPPLY_BASE') or os.path.expanduser('~/.claude/autoapply')
+        for l in open(os.path.join(base, 'guard_log.jsonl'), errors='ignore'):
+            if '"EMBED_OPEN"' in l and url[:200] in l.replace('\\u0026', '&'):
+                return True
+    except Exception:
+        pass
+    return False
 SEV_ORDER = ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')
 
 
@@ -164,7 +177,9 @@ def audit_transcript(path, since, core):
             F('CRITICAL', e['t'], 'Multiple resumes in one HTML file', e['path'])
         if e['tool'] == 'Bash' and re.search(r'python3?\s+\S*gen\w*\.py', e.get('cmd', '')):
             F('CRITICAL', e['t'], 'Ran a resume generator script', e['cmd'][:120])
-        if e['tool'] == 'navigate' and ATS_RE.search(e.get('url', '')):
+        if e['tool'] == 'navigate' and ATS_RE.search(e.get('url', '')) and _embed_allowed(e.get('url', '')):
+            F('INFO', e['t'], 'Embedded Greenhouse form opened under the LinkedIn Apply exception (guard-approved)', e['url'][:120])
+        elif e['tool'] == 'navigate' and ATS_RE.search(e.get('url', '')):
             F('CRITICAL', e['t'], 'Direct navigation to ATS URL (bypassed LinkedIn Apply)', e['url'][:120])
         if e['tool'] == 'javascript_tool' and re.search(r'location\.(href|assign|replace)|window\.open', e.get('js', '')) and ATS_RE.search(e.get('js', '')):
             F('CRITICAL', e['t'], 'JS navigation to ATS URL', e['js'][:120])

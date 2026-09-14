@@ -238,11 +238,15 @@ def check_resume_upload(paths, h, tab_id=None):
             _cands = [_st.get('active')] + list((_st.get('history') or {}).values())
             _ck = re.sub(r'[^a-z0-9]', '', comp) if comp else ''
             _start = None
-            for _a in _cands:
-                if not _a: continue
-                _rp = _a.get('resume_path')
-                if (_rp and os.path.abspath(_rp) == os.path.abspath(p)) or (_ck and _ck.startswith(_resume_key(_a.get('path', ''))[:6]) and _resume_key(_a.get('path', ''))):
-                    _start = _a.get('ts_start'); break
+            # only the resume started most recently before this PDF was rendered can be this job's tailoring;
+            # an older resume for the same company (a different role) must not supply the start time
+            _pm = os.path.getmtime(p)
+            _prior = [a for a in _cands if a and a.get('ts_start') and a['ts_start'] <= _pm]
+            _a = max(_prior, key=lambda a: a['ts_start']) if _prior else None
+            if _a:
+                _rp = _a.get('resume_path'); _rk = _resume_key(_a.get('path', ''))
+                if (_rp and os.path.abspath(os.path.expanduser(_rp)) == os.path.abspath(p)) or (_ck and _rk and _ck.startswith(_rk[:6])):
+                    _start = _a.get('ts_start')
             if _start and os.path.getmtime(jd) > _start + 60:
                 deny(f'JD file {os.path.basename(jd)} was saved after tailoring of this resume began; save the JD text right after reading it and before the first resume edit, then re-tailor against it. Re-copying the PDF does not satisfy this check.')
         except SystemExit:

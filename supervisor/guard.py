@@ -196,6 +196,9 @@ def check_one_resume_at_a_time(path, command=''):
         a['ts_last'] = now
         if os.path.isabs(path): a['path'] = path
     else:
+        if a:
+            _h = st.setdefault('history', {}); _h[os.path.basename(a['path'])] = a
+            if len(_h) > 60: [_h.pop(k2) for k2 in sorted(_h, key=lambda k2: _h[k2].get('ts_start', 0))[:len(_h) - 60]]
         st['active'] = dict(path=path, ts_start=now, ts_last=now)
     json.dump(st, open(ACTIVE, 'w'))
 
@@ -227,6 +230,23 @@ def check_resume_upload(paths, h, tab_id=None):
         if len(jdtxt) < 400: deny(f'saved JD at {jd} is only {len(jdtxt)} chars; that is not a real job description. Re-read the listing (wait/reload per the loading rule) and save the full "About the job" text.')
         if os.path.getmtime(jd) > os.path.getmtime(p) + 1: deny(f'JD file {os.path.basename(jd)} was written AFTER the resume PDF; the JD must be read before tailoring.')
         comp = (e.get('company') or '').lower()
+        # the JD must have been saved before tailoring STARTED (first copy/edit of this resume's HTML), which re-copying the PDF cannot change
+        try:
+            _st = json.load(open(os.path.join(BASE, 'active_resume.json')))
+            _cands = [_st.get('active')] + list((_st.get('history') or {}).values())
+            _ck = re.sub(r'[^a-z0-9]', '', comp) if comp else ''
+            _start = None
+            for _a in _cands:
+                if not _a: continue
+                _rp = _a.get('resume_path')
+                if (_rp and os.path.abspath(_rp) == os.path.abspath(p)) or (_ck and _ck.startswith(_resume_key(_a.get('path', ''))[:6]) and _resume_key(_a.get('path', ''))):
+                    _start = _a.get('ts_start'); break
+            if _start and os.path.getmtime(jd) > _start + 60:
+                deny(f'JD file {os.path.basename(jd)} was saved after tailoring of this resume began; save the JD text right after reading it and before the first resume edit, then re-tailor against it. Re-copying the PDF does not satisfy this check.')
+        except SystemExit:
+            raise
+        except Exception:
+            pass
         fn = os.path.basename(p).lower()
         if comp and comp.split()[0] not in fn: deny(f'ledger company {comp!r} does not match resume filename {fn!r}')
         if time.time() - _as_ts(e.get('ts', 0)) > 4 * 3600: deny('ledger entry is older than 4 hours; write a fresh entry for this application.')

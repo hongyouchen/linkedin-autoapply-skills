@@ -58,6 +58,10 @@ def main():
         log('STOP_ALLOWED_BUDGET', line=tail[i_paused][:200]); return
     if i_term > i_progress:
         log('STOP_ALLOWED_TERMINATED', line=tail[i_term][:200]); return
+    # LinkedIn security checkpoint (2026-09-14): stopping protects Andy's account; allowed until a later line shows work resumed
+    i_ckpt = max((i for i, l in enumerate(tail) if 'STOPPED-LINKEDIN-CHECKPOINT' in l), default=-1)
+    if i_ckpt >= 0 and not any(re.search(r'CHECKPOINT CLEARED|\bRESUMED\b|\bAPPLIED\b|\bSUBMITTED\b|PASS START\b', l) for l in tail[i_ckpt + 1:]):
+        log('STOP_ALLOWED_LINKEDIN_CHECKPOINT', line=tail[i_ckpt][:200]); return
     if len(st['blocks']) >= 3:
         return _release(st, 'three stop refusals in 10 minutes without progress')
     last_line = tail[-1][:200] if tail else '(empty log)'

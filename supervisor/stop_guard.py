@@ -51,8 +51,8 @@ def main():
     except FileNotFoundError: lines = []
     tail = lines[-400:]
     def last(pat): return max((i for i, l in enumerate(tail) if re.match(pat, l)), default=-1)
-    i_start, i_complete = last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS START\b'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS COMPLETE\b')
-    i_cleared, i_paused, i_term = last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?HALT \S+ CLEARED\b'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS PAUSED budget:'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\s+)?PASS TERMINATED\b')
+    i_start, i_complete = last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?Z?\s+)?PASS START\b'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?Z?\s+)?PASS COMPLETE\b')
+    i_cleared, i_paused, i_term = last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?Z?\s+)?HALT \S+ CLEARED\b'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?Z?\s+)?PASS PAUSED budget:'), last(r'(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?Z?\s+)?PASS TERMINATED\b')
     i_progress = max(i_start, i_cleared, i_complete)
     if i_paused > i_progress:
         log('STOP_ALLOWED_BUDGET', line=tail[i_paused][:200]); return
@@ -61,7 +61,19 @@ def main():
     if len(st['blocks']) >= 3:
         return _release(st, 'three stop refusals in 10 minutes without progress')
     last_line = tail[-1][:200] if tail else '(empty log)'
+    # a pass suspended for a priority pass (e.g. Andy's past-24h pass) is resumed, not restarted from page 1
+    _susp = None
     if i_complete >= i_progress and i_complete >= 0:
+        for _i in range(i_complete - 1, -1, -1):
+            _m = re.search(r'PASS (\d{3,4})\b[^\n]*\bSUSPENDED\b[^\n]*?(?:resume at\s*(.*))?$', tail[_i], re.I)
+            if _m:
+                _pid = _m.group(1)
+                if not any(re.search(r'PASS ' + _pid + r'\b[^\n]*\b(RESUMED|COMPLETE)\b', l) or re.match(r'(?:\S+\s+)?PASS COMPLETE ' + _pid + r'\b', l) for l in tail[_i + 1:]):
+                    _susp = (_pid, (_m.group(2) or tail[_i])[:160])
+                break
+    if _susp:
+        msg = REMINDER + f'The priority pass is COMPLETE. Now resume suspended PASS {_susp[0]} (do not start from page 1): write "PASS {_susp[0]} | RESUMED" and continue at: {_susp[1]}'
+    elif i_complete >= i_progress and i_complete >= 0:
         msg = REMINDER + f'The last pass is COMPLETE ({tail[i_complete][:120]}). Start the next full pass NOW: write "PASS START <id>" and navigate to page 1.'
     elif i_cleared > i_start:
         msg = REMINDER + 'A HALT was just cleared; continue from the listing after the last APPLIED/SKIPPED/LOGGED line, not from page 1. Last log line: ' + last_line

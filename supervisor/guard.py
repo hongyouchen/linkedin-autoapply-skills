@@ -85,6 +85,7 @@ def ledger_entries():
             e['ts'] = _as_ts(e.get('ts', 0))
             for _k in ('resume_path', 'jd_path'):
                 if isinstance(e.get(_k), str) and e[_k].startswith('~'): e[_k] = os.path.expanduser(e[_k])
+                elif isinstance(e.get(_k), str) and e[_k] and not os.path.isabs(e[_k]): e[_k] = os.path.join(BASE, e[_k])
             out.append(e)
     except FileNotFoundError: pass
     return out

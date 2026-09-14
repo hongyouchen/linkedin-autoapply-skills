@@ -478,6 +478,12 @@ def main():
         # loops inside a heredoc body (e.g. a python edit script for ONE resume) are not shell copy loops
         _shell = re.sub(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\2\s*(?:\n|$)", '\n', cmd, flags=re.S)
         _loop = re.search(r'\bfor\s+\w+\s+in\b|\bwhile\b[^\n]*\bdo\b|\bxargs\b', _shell)
+        # the same template shortcut written as a script: a loop whose body copies or writes .html files under a varying name
+        for _body in re.findall(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\2\s*(?:\n|$)", cmd, flags=re.S):
+            _b = _body[2]
+            if re.search(r'\b(for\s+\w+\s+in|while\b)', _b) and re.search(r'(shutil\.copy\w*|copyfile|os\.system\(\s*f?["\']cp\b|subprocess\.\w+\(\s*\[?\s*["\']cp\b|write_text|open\([^)\n]*["\'][wax]\+?["\']|\.write\()', _b) \
+               and re.search(r'(f["\'][^"\'\n]*\{[^}]+\}[^"\'\n]*\.html?["\']|\+\s*["\'][^"\'\n]*\.html?["\']|%\s*\w+[^\n]*\.html?|\.format\([^\n]*\.html?|["\'][^"\'\n]*\.html?["\']\s*%)', _b):
+                deny('this script copies or writes resume HTML files in a loop, which is template authoring; start each resume from resume core.pdf content individually, one file per command.')
         if len(_html_dests) >= 2 or (_loop and re.search(r'\bcp\b[^\n]*\.html?\b', _shell)):
             deny('copying a base resume HTML to multiple files is template authoring; start each resume from resume core.pdf content individually.')
 

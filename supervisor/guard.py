@@ -475,8 +475,10 @@ def main():
         if n_outputs and (re.search(r'\bfor\b.*\b(do|in)\b', cmd) or n_outputs > 1 or n_inputs > 1):
             deny('this command renders more than one resume. Resumes are authored and rendered ONE AT A TIME, each with its JD open and visually checked before the next is started (hard_rule_no_resume_shortcuts rule 4). Render a single HTML file per command.')
         _html_dests = set(re.findall(r'\bcp\s+[^;&|\n]*?\s"?([^\s;&|"]+\.html?)"?\s*(?=$|[;&|\n])', cmd, re.M))
-        _loop = re.search(r'\bfor\s+\w+\s+in\b|\bwhile\b[^\n]*\bdo\b|\bxargs\b', cmd)
-        if len(_html_dests) >= 2 or (_loop and re.search(r'\bcp\b[^\n]*\.html?\b', cmd)):
+        # loops inside a heredoc body (e.g. a python edit script for ONE resume) are not shell copy loops
+        _shell = re.sub(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\2\s*(?:\n|$)", '\n', cmd, flags=re.S)
+        _loop = re.search(r'\bfor\s+\w+\s+in\b|\bwhile\b[^\n]*\bdo\b|\bxargs\b', _shell)
+        if len(_html_dests) >= 2 or (_loop and re.search(r'\bcp\b[^\n]*\.html?\b', _shell)):
             deny('copying a base resume HTML to multiple files is template authoring; start each resume from resume core.pdf content individually.')
 
     # --- Never stop a pass to ask ---

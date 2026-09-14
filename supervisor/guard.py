@@ -402,7 +402,7 @@ def main():
             deny('this hold/skip cites an office-attendance requirement of 4 days a week or less. Andy already answered that in your chat on 2026-09-14 '
                  '("i am open to 4 days in the office, go ahead and apply"): answer Yes to in-office/hybrid questions up to 4 days/week and keep applying. '
                  'Andy (2026-09-14): never assume anything he did not say. Hold or skip only for his stated reasons: 7+ YOE, Gusto, staffing/undisclosed employer, already applied, '
-                 'or a form item that needs his own answer (essay, legal name, home address, consent/attestation, unsupported experience). '
+                 'or a requirement Andy has not approved: travel percentage, relocation, 5 days/week in office, or a form item that needs his own answer (essay, legal name, home address, consent/attestation, unsupported experience). Travel and relocation holds are valid. '
                  'If one of those also applies, log only that reason. Offending line: ' + _bad[0])
 
     # --- hook-observed remediation step: clicking the LinkedIn "Go to company site" link ---
